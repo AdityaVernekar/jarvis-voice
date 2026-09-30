@@ -1,0 +1,174 @@
+// The hub: adapters hand it normalized events, it keeps the session registry current
+// and decides what (if anything) to say.
+//
+//   agent hook ──► adapter.toEvents() ──► ingest() ──► session registry
+//                                              └──► worker ──► processEvent() ──► speak()
+//
+// ingest() runs inside the agent's hook process, so it only does cheap sync work and hands
+// everything slow (transcript reads, LLM summaries, TTS) to a detached worker process.
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { getAdapter } from "../adapters/index.mjs";
+import { agentConfig, config } from "../config.mjs";
+import { phrase } from "../i18n.mjs";
+import { BIN, P } from "../paths.mjs";
+import { summarize } from "../summary/summarize.mjs";
+import { ensureDirs, log, now, projectName, readJson } from "../util.mjs";
+import { speak } from "../voice/speak.mjs";
+import { endsWithQuestion, normalizeEvent } from "./events.mjs";
+import { getSession, pruneSessions, updateSession } from "./sessions.mjs";
+
+/** Entry point for every agent. Returns the normalized events (handy for tests). */
+export async function ingest(agentId, payload, { deps = {} } = {}) {
+  ensureDirs();
+  const adapter = getAdapter(agentId);
+  const events = (adapter.toEvents(payload || {}) || []).map((e) => normalizeEvent(e, agentId));
+  for (const ev of events) await ingestEvent(ev, { deps });
+  return events;
+}
+
+/**
+ * Handle one already-normalized hub event. turn_start is recorded inline (it must be quick);
+ * everything else goes to a background worker unless `foreground` or JARVIS_FOREGROUND=1.
+ */
+export async function ingestEvent(ev, { foreground = process.env.JARVIS_FOREGROUND === "1", deps = {} } = {}) {
+  if (ev.type === "turn_start") {
+    updateSession(ev.agent, ev.session, {
+      status: "working",
+      cwd: ev.cwd || getSession(ev.agent, ev.session)?.cwd || null,
+      project: ev.project || getSession(ev.agent, ev.session)?.project || projectName(ev.cwd),
+      turnStart: ev.at,
+      spokeAfterStop: false,
+      lastEvent: "turn_start",
+    });
+    if (Math.random() < 0.05) pruneSessions();
+    return { recorded: "turn_start" };
+  }
+  if (foreground) return processEvent(ev, deps);
+  detach(ev);
+  return { detached: true };
+}
+
+function detach(ev) {
+  const file = path.join(P.tmp, `job-${process.pid}-${now()}-${Math.random().toString(36).slice(2, 8)}.json`);
+  fs.writeFileSync(file, JSON.stringify(ev), { mode: 0o600 });
+  spawn(process.execPath, [BIN, "_worker", file], { detached: true, stdio: "ignore", env: process.env })
+    .on("error", (e) => log({ error: `worker spawn failed: ${e.message}`, agent: ev.agent }))
+    .unref();
+}
+
+/** Background worker: `jarvis _worker <jobfile>`. */
+export async function runWorker(file) {
+  const ev = readJson(file, null);
+  fs.rmSync(file, { force: true });
+  if (!ev) return;
+  try {
+    await processEvent(ev);
+  } catch (e) {
+    log({ error: String(e?.stack || e), agent: ev.agent, type: ev.type });
+  }
+}
+
+// The worker can take seconds (summary, TTS). If the user started a new turn meanwhile, the
+// session already says "working" with a fresh turnStart; keep those and only record the line.
+const guarded = (ev, patch) => (cur) => {
+  if (cur.turnStart && cur.turnStart > ev.at) {
+    const { status, turnStart, spokeAfterStop, lastEvent, ...rest } = patch;
+    return rest;
+  }
+  return patch;
+};
+
+const STATUS_FOR = { turn_end: "done", needs_input: "waiting", idle: "waiting", error: "error", info: null };
+
+/** Decide what to say for one event, update the registry, speak. */
+export async function processEvent(input, deps = {}) {
+  const adapter = getAdapter(input.agent);
+  let ev = adapter.enrich ? await adapter.enrich(input) : input;
+  const cfg = agentConfig(config(), ev.agent);
+  const prev = getSession(ev.agent, ev.session) || {};
+  const project = ev.project || prev.project || projectName(ev.cwd || prev.cwd);
+  const name = cfg.label || adapter.name;
+  const who = cfg.announceAgent || cfg.label ? `${name}, ${project}` : project;
+  const meta = { agent: ev.agent, session: ev.session, project, type: ev.type };
+  const base = { cwd: ev.cwd || prev.cwd || null, project, lastEvent: ev.type };
+
+  let say = null; // { text, kind, lang, via? }
+  let status = STATUS_FOR[ev.type];
+  const patch = {};
+
+  switch (ev.type) {
+    case "turn_end": {
+      const durationMs = ev.durationMs ?? (prev.turnStart ? ev.at - prev.turnStart : null);
+      patch.lastDurationMs = durationMs;
+      if (durationMs != null && durationMs < cfg.minTurnSeconds * 1000) {
+        log({ skipped: "short_turn", secs: Math.round(durationMs / 1000), ...meta });
+        updateSession(ev.agent, ev.session, guarded(ev, { ...base, ...patch, status: "done", turnStart: null }));
+        return { skipped: "short_turn" };
+      }
+      const question = endsWithQuestion(ev.text);
+      status = question ? "waiting" : "done";
+      if (ev.line) say = { text: ev.line, kind: question ? "needs_input" : "done", lang: ev.lang || "en" };
+      else {
+        const s = await summarize(ev.text, cfg, { fetch: deps.fetch });
+        say = { text: `${who}. ${s.line}`, kind: question ? "needs_input" : "done", lang: s.lang, via: s.via };
+      }
+      patch.turnStart = null;
+      break;
+    }
+    case "idle": {
+      if (prev.spokeAfterStop) {
+        updateSession(ev.agent, ev.session, base); // keep "done"/"waiting" from the turn we already announced
+        return { skipped: "already_spoke" };
+      }
+      const ph = phrase(cfg, "waiting", who);
+      say = { text: ph.text, kind: "needs_input", lang: ph.lang };
+      break;
+    }
+    case "needs_input": {
+      const ph = ev.tool
+        ? phrase(cfg, "permission", who, ev.tool)
+        : ev.message
+          ? phrase(cfg, "attention", who, ev.message)
+          : phrase(cfg, "waiting", who);
+      say = { text: ev.line || ph.text, kind: "needs_input", lang: ev.line ? ev.lang || "en" : ph.lang };
+      break;
+    }
+    case "error": {
+      if (ev.line) say = { text: ev.line, kind: "error", lang: ev.lang || "en" };
+      else if (ev.text || ev.message) {
+        const s = await summarize(ev.text || ev.message, cfg, { fetch: deps.fetch });
+        say = { text: `${who}. ${s.line}`, kind: "error", lang: s.lang, via: s.via };
+      } else {
+        const ph = phrase(cfg, "failed", who);
+        say = { text: ph.text, kind: "error", lang: ph.lang };
+      }
+      patch.turnStart = null;
+      break;
+    }
+    case "info":
+      say = { text: ev.line || ev.text || ev.message || "", kind: "info", lang: ev.lang || "en" };
+      break;
+  }
+
+  const line = say?.text || null;
+  updateSession(
+    ev.agent,
+    ev.session,
+    guarded(ev, {
+      ...base,
+      ...patch,
+      ...(status ? { status } : {}),
+      ...(line ? { lastLine: line } : {}),
+      ...(ev.type === "turn_end" || ev.type === "needs_input" ? { spokeAfterStop: Boolean(line) } : {}),
+    }),
+  );
+
+  if (!line) return { skipped: "nothing_to_say" };
+  if (!cfg.enabled) {
+    log({ skipped: "agent_disabled", line, ...meta });
+    return { skipped: "agent_disabled" };
+  }
+  return speak(line, say.kind, { ...meta, lang: say.lang, via: say.via, queuedAt: ev.at }, deps);
+}

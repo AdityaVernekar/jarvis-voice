@@ -1,0 +1,87 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { tempHome } from "./helpers.mjs";
+
+tempHome();
+const { getAdapter, listAdapters } = await import("../src/adapters/index.mjs");
+const { notifySpan, rewriteToml } = await import("../src/adapters/codex.mjs");
+
+const claude = getAdapter("claude-code");
+const codex = getAdapter("codex");
+
+test("registry has built-ins and a generic fallback", () => {
+  assert.deepEqual(listAdapters().map((a) => a.id).sort(), ["claude-code", "codex"]);
+  const g = getAdapter("gemini-cli");
+  assert.equal(g.name, "Gemini Cli");
+  assert.deepEqual(g.toEvents({ type: "info", line: "hi" }), [{ type: "info", line: "hi", agent: "gemini-cli" }]);
+});
+
+test("claude-code maps hook events", () => {
+  const base = { session_id: "s", cwd: "/x/api" };
+  assert.equal(claude.toEvents({ ...base, hook_event_name: "UserPromptSubmit" })[0].type, "turn_start");
+  const stop = claude.toEvents({ ...base, hook_event_name: "Stop", last_assistant_message: "Done.", transcript_path: "/t" })[0];
+  assert.equal(stop.type, "turn_end");
+  assert.equal(stop.text, "Done.");
+  assert.deepEqual(claude.toEvents({ ...base, hook_event_name: "Stop", stop_hook_active: true }), []);
+  const perm = claude.toEvents({ ...base, hook_event_name: "Notification", message: "Claude needs your permission to use Bash" })[0];
+  assert.deepEqual([perm.type, perm.tool], ["needs_input", "Bash"]);
+  assert.equal(claude.toEvents({ ...base, hook_event_name: "Notification", message: "Claude is waiting for your input" })[0].type, "idle");
+  assert.equal(claude.toEvents({ ...base, hook_event_name: "Notification", notification_type: "idle_prompt" })[0].type, "idle");
+  assert.deepEqual(claude.toEvents({ ...base, hook_event_name: "PreToolUse" }), []);
+});
+
+test("codex maps agent-turn-complete", () => {
+  const [e] = codex.toEvents({ type: "agent-turn-complete", "thread-id": "t1", cwd: "/x/b", "last-assistant-message": "Ok." });
+  assert.deepEqual([e.type, e.session, e.text], ["turn_end", "t1", "Ok."]);
+  assert.deepEqual(codex.toEvents({ type: "something-else" }), []);
+});
+
+test("notifySpan parses single and multi-line arrays", () => {
+  assert.deepEqual(notifySpan(['notify = ["a", "b c"]'], 0), { end: 0, value: ["a", "b c"] });
+  const lines = ["notify = [", '  "x", # comment', "  'y',", "]", "model = 1"];
+  assert.deepEqual(notifySpan(lines, 0), { end: 3, value: ["x", "y"] });
+  assert.equal(notifySpan(['notify = "str"'], 0).value, null);
+});
+
+test("rewriteToml installs at top level, refuses to clobber, chains and restores", () => {
+  const ours = 'notify = ["/node", "/j/bin/jarvis.mjs", "codex"]';
+  const fresh = rewriteToml('model = "o3"\n[tui]\nx = 1\n', { ours });
+  assert.ok(fresh.text.indexOf(ours) < fresh.text.indexOf("[tui]"));
+
+  const theirs = 'notify = ["notifier", "-t"]\n[tui]\n';
+  const refused = rewriteToml(theirs, { ours });
+  assert.equal(refused.changed, false);
+  assert.match(refused.message, /--chain/);
+
+  const chained = rewriteToml(theirs, { ours, chain: true });
+  assert.deepEqual(chained.chainSaved, ["notifier", "-t"]);
+  assert.ok(!chained.text.includes("notifier"));
+
+  const again = rewriteToml(chained.text, { ours }); // re-install is idempotent
+  assert.equal(again.text.split(ours).length, 2);
+
+  const undone = rewriteToml(chained.text, { ours, uninstall: true, savedChain: chained.chainSaved });
+  assert.ok(undone.restored);
+  assert.match(undone.text, /^notify = \["notifier", "-t"\]/);
+  assert.ok(!undone.text.includes("jarvis"));
+});
+
+test("firstTableLine skips brackets inside top-level arrays and strings", async () => {
+  const { firstTableLine } = await import("../src/adapters/codex.mjs");
+  assert.equal(firstTableLine(["a = 1", "[tui]"]), 1);
+  assert.equal(firstTableLine(["profiles = [", '  ["a"],', "]", 'notify = ["x"]', "[tui]"]), 4);
+  assert.equal(firstTableLine(['s = """', "[not a table]", '"""', "[t]"]), 3);
+  const ours = 'notify = ["/n", "/j/bin/jarvis.mjs", "codex"]';
+  const r = rewriteToml('profiles = [\n  ["a"],\n]\nnotify = ["x"]\n[tui]\n', { ours });
+  assert.equal(r.changed, false); // saw the existing notify instead of adding a duplicate
+  assert.equal(rewriteToml('notify = ["a"]\nnotify = ["b"]\n', { ours, chain: true }).changed, false);
+});
+
+test("isJarvisCommand only matches commands Jarvis wrote", async () => {
+  const { isJarvisCommand } = await import("../src/adapters/install-util.mjs");
+  assert.ok(isJarvisCommand('"/usr/bin/node" "/x/bin/jarvis.mjs" hook claude-code'));
+  assert.ok(isJarvisCommand('"/usr/bin/node" "/x/jarvis.mjs" hook'));
+  assert.ok(isJarvisCommand('notify = ["/usr/bin/node", "/x/jarvis.mjs", "codex"]'));
+  assert.ok(!isJarvisCommand('notify = ["node", "/other/jarvis.mjs", "--notify"]'));
+  assert.ok(!isJarvisCommand("node ~/bots/jarvis.mjs remind"));
+});
