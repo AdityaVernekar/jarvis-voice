@@ -18,5 +18,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: find . -name '*.mjs' -not -path './node_modules/*' -print0 | xargs -0 -n1 node --check
+      - run: find . -name '*.mjs' -not -path '*/node_modules/*' -not -path './app/dist/*' -print0 | xargs -0 -n1 node --check
       - run: npm test

@@ -10,7 +10,7 @@ const claude = getAdapter("claude-code");
 const codex = getAdapter("codex");
 
 test("registry has built-ins and a generic fallback", () => {
-  assert.deepEqual(listAdapters().map((a) => a.id).sort(), ["claude-code", "codex"]);
+  assert.deepEqual(listAdapters().map((a) => a.id).sort(), ["claude-code", "claude-desktop", "codex"]);
   const g = getAdapter("gemini-cli");
   assert.equal(g.name, "Gemini Cli");
   assert.deepEqual(g.toEvents({ type: "info", line: "hi" }), [{ type: "info", line: "hi", agent: "gemini-cli" }]);

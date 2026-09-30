@@ -22,6 +22,6 @@ export default {
       }),
     });
     if (!res.ok) throw new Error(`openai HTTP ${res.status}: ${redact((await res.text()).slice(0, 200))}`);
-    playBuffer(Buffer.from(await res.arrayBuffer()), ".mp3");
+    await playBuffer(Buffer.from(await res.arrayBuffer()), ".mp3");
   },
 };

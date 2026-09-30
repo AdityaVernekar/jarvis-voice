@@ -37,7 +37,7 @@ export default {
     const buf = Buffer.from(await res.arrayBuffer());
     if (!/audio/.test(res.headers.get("content-type") || "") || buf.length < 2000)
       throw new Error(`smallest returned no audio (${buf.length} bytes, ${res.headers.get("content-type")})`);
-    playBuffer(buf, ".wav");
+    await playBuffer(buf, ".wav");
   },
 };
 

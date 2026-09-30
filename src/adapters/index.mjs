@@ -12,6 +12,7 @@
 // Agents without an adapter can still talk to the hub with `jarvis emit --agent <id> …`.
 // See docs/adapters.md.
 import claudeCode from "./claude-code.mjs";
+import claudeDesktop from "./claude-desktop.mjs";
 import codex from "./codex.mjs";
 
 const ADAPTERS = new Map();
@@ -37,4 +38,4 @@ export function getAdapter(id) {
 
 export const listAdapters = () => [...ADAPTERS.values()];
 
-for (const a of [claudeCode, codex]) registerAdapter(a);
+for (const a of [claudeCode, codex, claudeDesktop]) registerAdapter(a);

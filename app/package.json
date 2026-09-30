@@ -1,0 +1,47 @@
+{
+  "name": "jarvis-voice-app",
+  "productName": "Jarvis Voice",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mac app for jarvis-voice: spoken pings for your coding agents, no terminal needed.",
+  "type": "module",
+  "main": "main/main.mjs",
+  "author": "Aditya Vernekar",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --mac --dir",
+    "dist": "electron-builder --mac --universal",
+    "dist:arm64": "electron-builder --mac --arm64",
+    "bench": "node ../scripts/bench-hook.mjs --electron \"$PWD/dist/mac-universal/Jarvis Voice.app/Contents/MacOS/Jarvis Voice\""
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "io.github.adityavernekar.jarvisvoice",
+    "productName": "Jarvis Voice",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["main/**", "preload/**", "renderer/**", "build/tray*.png", "package.json"],
+    "extraResources": [
+      { "from": "../src", "to": "core/src" },
+      { "from": "../bin", "to": "core/bin" },
+      { "from": "../package.json", "to": "core/package.json" }
+    ],
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["universal"] },
+        { "target": "zip", "arch": ["universal"] }
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": { "NSHumanReadableCopyright": "MIT License" }
+    },
+    "dmg": { "sign": false, "title": "Jarvis Voice" },
+    "publish": null
+  }
+}

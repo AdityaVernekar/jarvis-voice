@@ -6,11 +6,15 @@ import path from "node:path";
 import { getAdapter, listAdapters } from "../adapters/index.mjs";
 import { agentConfig, apiKey, config, updateConfig } from "../config.mjs";
 import { EVENT_TYPES, normalizeEvent } from "../hub/events.mjs";
+import { handleCodex } from "../hub/entry.mjs";
 import { ingest, ingestEvent, runWorker } from "../hub/hub.mjs";
+import { startHubServer } from "../hub/server.mjs";
+import { stopSpeaking } from "../control.mjs";
+import { writeShim } from "../shim.mjs";
 import { listSessions } from "../hub/sessions.mjs";
 import { isKnownLang, LANG_NAMES, langLabel, phrase } from "../i18n.mjs";
 import { BIN, HOME, P, ROOT } from "../paths.mjs";
-import { currentMode, inQuietHours, setMode } from "../policy.mjs";
+import { currentMode, inQuietHours, QUIET_ALLOW_DEFAULT, setMode } from "../policy.mjs";
 import { ago, ensureDirs, log, now, parseFlags, projectName, readJson, which } from "../util.mjs";
 import { listEngines } from "../voice/engines/index.mjs";
 import { fetchVoices, findVoice } from "../voice/engines/smallest.mjs";
@@ -21,7 +25,9 @@ const pkg = readJson(path.join(ROOT, "package.json"), {});
 export const HELP = `jarvis-voice ${pkg.version || ""} — spoken pings for terminal coding agents
 
 Setup
-  jarvis install [--only claude-code,codex] [--chain] [--env path/.env]
+  jarvis install [--only claude-code,codex,claude-desktop] [--chain] [--env path/.env] [--hub | --node]
+                                      hooks already set by the Mac app stay on the app (--node overrides)
+  jarvis env <path/.env>              where API keys are read from (the app uses this too)
   jarvis uninstall
   jarvis test [--provider smallest|openai|say] [--agent id]
 
@@ -44,11 +50,16 @@ Control
   jarvis off [minutes]                silence everything (default: until \`on\`)
   jarvis on
   jarvis stop                         stop talking now and drop every queued line
+  jarvis serve                        run the hub in the foreground (what the desktop app does)
+                                      (install with --hub so hooks send to it)
+  jarvis quiet-hours [23:00-08:00] [--silent | --allow needs_input,error] [off]
+                                      nightly window; by default only "needs you" pings get through
   jarvis status
 
 Agent entry points (written by \`jarvis install\`)
   jarvis hook [adapter]               Claude Code hooks (payload on stdin)
   jarvis codex '<json>'               Codex CLI notify (payload as last argument)
+  jarvis mcp                          MCP server for Claude Desktop (stdio)
 `;
 
 // Hooks pipe a small payload and close stdin. The timeout covers callers that leave it open.
@@ -220,21 +231,58 @@ function cmdAgents(rest) {
 // Silence what's playing and throw away everything queued. Lines already waiting for the
 // speaker see the flush marker and drop themselves; stray workers and players are killed.
 function cmdStop() {
-  fs.writeFileSync(P.flushed, JSON.stringify({ at: now() }), { mode: 0o600 });
-  let jobs = 0;
-  for (const f of fs.existsSync(P.tmp) ? fs.readdirSync(P.tmp) : []) {
-    if (!f.startsWith("job-")) continue;
-    fs.rmSync(path.join(P.tmp, f), { force: true });
-    jobs++;
-  }
-  const killed = [];
-  if (process.platform !== "win32" && which("pkill")) {
-    const kill = (pattern) => spawnSync("pkill", ["-f", pattern], { stdio: "ignore" }).status === 0;
-    if (kill(`${BIN} _worker`) | kill(`jarvis.mjs _worker`)) killed.push("queued workers");
-    if (kill(P.tmp)) killed.push("playback");
-  }
-  fs.rmSync(P.lock, { recursive: true, force: true });
+  const { jobs, killed } = stopSpeaking();
   console.log(`jarvis: stopped. Cleared ${jobs} queued job${jobs === 1 ? "" : "s"}${killed.length ? `, killed ${killed.join(" and ")}` : ""}.`);
+}
+
+// Run the hub in the foreground: hooks sent to the socket are handled in this process.
+// The desktop app does the same thing; this is for people who only want the CLI.
+async function cmdServe() {
+  const hub = await startHubServer();
+  console.log(`jarvis: hub listening on ${hub.socket}. Ctrl-C to stop.`);
+  const bye = () => hub.close().then(() => process.exit(0));
+  process.on("SIGINT", bye);
+  process.on("SIGTERM", bye);
+}
+
+const HHMM = /^([01]?\d|2[0-3]):[0-5]\d$/;
+const describeQuiet = (qh) =>
+  !qh
+    ? "quiet hours: off"
+    : `quiet hours: ${qh.start}-${qh.end}, ${(() => {
+        const allow = Array.isArray(qh.allow) ? qh.allow : QUIET_ALLOW_DEFAULT;
+        return allow.length ? `only ${allow.join(" and ")} pings get through` : "completely silent";
+      })()}`;
+
+// jarvis quiet-hours 21:00-08:00 --silent  |  --allow needs_input,error  |  off
+function cmdQuietHours(rest) {
+  const { flags, words } = parseFlags(rest, ["allow"]);
+  const cur = config().quietHours;
+  if (words[0] === "off") {
+    updateConfig({ quietHours: null });
+    return console.log("jarvis: quiet hours: off");
+  }
+  if (!words.length && !flags.silent && !flags.allow) return console.log(describeQuiet(cur));
+  const range = words.join(" ").replace(/\s*(-|to)\s*/, " ").split(/\s+/).filter(Boolean);
+  const [start, end] = range.length ? range : [cur?.start || "23:00", cur?.end || "08:00"];
+  if (!HHMM.test(start) || !HHMM.test(end)) {
+    process.exitCode = 2;
+    return console.error("usage: jarvis quiet-hours 23:00-08:00 [--silent | --allow needs_input,error] | off");
+  }
+  const kinds = ["done", "needs_input", "error", "info"];
+  let allow = Array.isArray(cur?.allow) ? cur.allow : QUIET_ALLOW_DEFAULT;
+  if (flags.silent) allow = [];
+  else if (typeof flags.allow === "string") {
+    allow = flags.allow === "none" ? [] : flags.allow.split(",").map((k) => k.trim()).filter(Boolean);
+    const bad = allow.filter((k) => !kinds.includes(k));
+    if (bad.length) {
+      process.exitCode = 2;
+      return console.error(`jarvis: unknown kind "${bad[0]}" (expected ${kinds.join(", ")} or none)`);
+    }
+  }
+  const qh = { start, end, allow };
+  updateConfig({ quietHours: qh });
+  console.log(`jarvis: ${describeQuiet(qh)}`);
 }
 
 function cmdStatus() {
@@ -246,6 +294,7 @@ function cmdStatus() {
     .find((e) => e.spoke);
   const status = {
     mode: currentMode(),
+    quietHours: describeQuiet(cfg.quietHours),
     quietHoursNow: inQuietHours(cfg.quietHours),
     engines: cfg.ttsProviders.join(" → "),
     smallestKey: apiKey(cfg, "SMALLEST_API_KEY") ? "found" : "missing",
@@ -280,6 +329,15 @@ function cmdInstall(rest, uninstall = false) {
   ensureDirs();
   const only = flags.only ? String(flags.only).split(",").map((s) => s.trim()) : null;
   const opts = { node: process.execPath, bin: BIN, uninstall, chain: Boolean(flags.chain) };
+  // --hub: hooks call the curl shim, which talks to `jarvis serve` or the desktop app.
+  // Hooks the Mac app set up stay on the shim, so re-running install doesn't disconnect the app;
+  // --node switches back to calling this checkout directly.
+  const onShim = !flags.node && !uninstall && usesShim(only);
+  if (!uninstall && (flags.hub || onShim)) {
+    // The app rewrites the shim with its own fallback on every launch; don't clobber it.
+    opts.cmd = [onShim && fs.existsSync(P.shim) ? P.shim : writeShim()];
+    if (onShim && !flags.hub) console.log(`• Hooks go through ${P.shim} (the Mac app or \`jarvis serve\`); keeping that. Use --node to call this checkout directly.`);
+  }
   for (const a of listAdapters()) {
     if (!a.install || (only && !only.includes(a.id))) continue;
     try {
@@ -290,22 +348,54 @@ function cmdInstall(rest, uninstall = false) {
   }
   if (uninstall) return console.log("\nJarvis hooks removed. Your settings in ~/.jarvis-voice were kept.");
 
+  setEnvFile(flags.env);
+  console.log(`\nNext:\n  jarvis test          # you should hear Jarvis\n  jarvis agents        # see every agent session\n  Restart running Claude Code / Codex sessions so they pick up the hooks.`);
+  if (!process.env.PATH?.split(":").some((d) => fs.existsSync(path.join(d, "jarvis"))))
+    console.log(`\n  No \`jarvis\` on PATH yet. Either \`npm link\` in ${ROOT}, or:\n  alias jarvis='node "${BIN}"'`);
+}
+
+// True when every installed Jarvis hook for these adapters already calls the shim.
+function usesShim(only) {
+  const files = listAdapters()
+    .filter((a) => a.install && a.configFile && (!only || only.includes(a.id)))
+    .map((a) => {
+      try {
+        return fs.readFileSync(a.configFile(), "utf8");
+      } catch {
+        return "";
+      }
+    })
+    .filter((t) => /jarvis(?:\.mjs|-hook)/.test(t));
+  return files.length > 0 && files.every((t) => t.includes("jarvis-hook"));
+}
+
+function cmdEnv(rest) {
+  const file = rest.find((a) => !a.startsWith("--"));
+  if (!file) {
+    const cfg = config();
+    return console.log(cfg.envFile ? `Keys are read from ${cfg.envFile}` : "No envFile set. Usage: jarvis env /path/to/.env");
+  }
+  if (!fs.existsSync(path.resolve(file))) {
+    process.exitCode = 1;
+    return console.log(`✗ ${file} not found`);
+  }
+  setEnvFile(file);
+}
+
+function setEnvFile(explicit) {
   // Where API keys live: --env, else a .env next to this checkout. ~/.jarvis-voice/.env and the
   // environment are always read too (see apiKey()).
   const cfgNow = readJson(P.config, {});
-  const guess = [flags.env, path.join(ROOT, ".env")]
+  const guess = [explicit, path.join(ROOT, ".env")]
     .filter(Boolean)
     .map((f) => path.resolve(f))
     .find((f) => fs.existsSync(f));
-  if (flags.env && !fs.existsSync(path.resolve(flags.env))) console.log(`! --env ${flags.env} not found; ignoring`);
-  if (guess && (flags.env || !cfgNow.envFile)) updateConfig({ envFile: guess });
+  if (explicit && !fs.existsSync(path.resolve(explicit))) console.log(`! --env ${explicit} not found; ignoring`);
+  if (guess && (explicit || !cfgNow.envFile)) updateConfig({ envFile: guess });
   const cfg = config();
   const keys = ["SMALLEST_API_KEY", "OPENAI_API_KEY"].filter((k) => apiKey(cfg, k));
   console.log(`✓ Jarvis config at ${P.config}${cfg.envFile ? ` (keys from ${cfg.envFile})` : ""}`);
   console.log(`  keys found: ${keys.length ? keys.join(", ") : "none — Jarvis will use your system voice"}`);
-  console.log(`\nNext:\n  jarvis test          # you should hear Jarvis\n  jarvis agents        # see every agent session\n  Restart running Claude Code / Codex sessions so they pick up the hooks.`);
-  if (!process.env.PATH?.split(":").some((d) => fs.existsSync(path.join(d, "jarvis"))))
-    console.log(`\n  No \`jarvis\` on PATH yet. Either \`npm link\` in ${ROOT}, or:\n  alias jarvis='node "${BIN}"'`);
 }
 
 // ---------- dispatch ----------
@@ -319,15 +409,13 @@ export async function main(argv) {
       const agent = rest[0] && !rest[0].startsWith("-") ? rest[0] : "claude-code";
       return ingest(agent, parseJson(await readStdin()));
     }
-    case "codex": {
-      const raw = rest[rest.length - 1] || "{}";
-      const payload = parseJson(raw);
-      const codex = getAdapter("codex");
-      // Called back by a chained notify wrapper: this turn was already handled.
-      if (process.env.JARVIS_FORWARDED === "1") return log({ skipped: "forwarded_echo", agent: "codex" });
-      if (codex.firstSeen && !codex.firstSeen(payload, raw)) return log({ skipped: "duplicate_turn", agent: "codex" });
-      codex.forward?.(raw);
-      return ingest("codex", payload);
+    case "codex":
+      return handleCodex(rest[rest.length - 1] || "{}", { forwarded: process.env.JARVIS_FORWARDED === "1" });
+    case "serve":
+      return cmdServe(rest);
+    case "mcp": {
+      const { runMcpServer } = await import("../mcp/server.mjs");
+      return runMcpServer();
     }
     case "_worker":
       return runWorker(rest[0]);
@@ -364,10 +452,15 @@ export async function main(argv) {
     case "stop":
     case "flush":
       return cmdStop();
+    case "quiet-hours":
+    case "night":
+      return cmdQuietHours(rest);
     case "test":
       return cmdTest(rest);
     case "install":
       return cmdInstall(rest);
+    case "env":
+      return cmdEnv(rest);
     case "uninstall":
       return cmdInstall(rest, true);
     case "version":

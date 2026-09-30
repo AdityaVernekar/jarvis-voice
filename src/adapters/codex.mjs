@@ -8,7 +8,7 @@ import path from "node:path";
 import { config, updateConfig } from "../config.mjs";
 import { log, now, readJson } from "../util.mjs";
 import { P } from "../paths.mjs";
-import { backup, isJarvisCommand, quote } from "./install-util.mjs";
+import { backup, commandPrefix, isJarvisCommand, quote } from "./install-util.mjs";
 
 const tomlFile = () => path.join(os.homedir(), ".codex", "config.toml");
 const MARKER = "# Jarvis voice pings";
@@ -176,6 +176,8 @@ export default {
     }
   },
 
+  configFile: tomlFile, // the file install() edits; the desktop app reads it to show hook status
+
   isInstalled() {
     try {
       return isJarvisCommand(fs.readFileSync(tomlFile(), "utf8"));
@@ -184,11 +186,11 @@ export default {
     }
   },
 
-  install({ node, bin, uninstall = false, chain = false }) {
+  install({ node, bin, cmd, uninstall = false, chain = false }) {
     const file = tomlFile();
     const exists = fs.existsSync(file);
     if (!exists && uninstall) return [];
-    const ours = `notify = [${quote(node)}, ${quote(bin)}, "codex"]`;
+    const ours = `notify = [${[...commandPrefix({ cmd, node, bin }), "codex"].map(quote).join(", ")}]`;
     const savedChain = readJson(P.config, {}).codexChain || null;
     const r = rewriteToml(exists ? fs.readFileSync(file, "utf8") : "", { ours, uninstall, chain, savedChain });
     const msgs = r.message ? [r.message] : [];

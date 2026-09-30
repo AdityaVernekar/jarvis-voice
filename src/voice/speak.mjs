@@ -4,7 +4,7 @@ import { agentConfig, config } from "../config.mjs";
 import { withLock } from "../lock.mjs";
 import { P } from "../paths.mjs";
 import { policyBlock } from "../policy.mjs";
-import { echo, ensureDirs, isDry, log, now, plainFirstSentence, readJson, writeJson } from "../util.mjs";
+import { echo, ensureDirs, isDry, log, now, plainFirstSentence, readJson, redact, writeJson } from "../util.mjs";
 import { getEngine } from "./engines/index.mjs";
 import { play, playBuffer as realPlayBuffer } from "./play.mjs";
 
@@ -19,7 +19,9 @@ const DUPLICATE_WINDOW_MS = 60_000;
 export const STALE_MS = 2 * 60_000;
 
 // Why a queued line should be dropped once it reaches the front of the queue, or null.
-function dropReason(queuedAt, kind, cfg, force) {
+// `stillNeeded` lets the caller withdraw a line, e.g. a permission alert the user already
+// answered in the terminal while it waited.
+function dropReason(queuedAt, kind, cfg, force, stillNeeded) {
   if (force) return null;
   const blocked = policyBlock(kind, cfg); // the user may have run `jarvis off` while we waited
   if (blocked) return blocked;
@@ -27,25 +29,26 @@ function dropReason(queuedAt, kind, cfg, force) {
     if (queuedAt <= (readJson(P.flushed, {}).at || 0)) return "flushed";
     if (now() - queuedAt > STALE_MS) return "stale";
   }
+  if (stillNeeded && !stillNeeded()) return "resolved";
   return null;
 }
 
 /**
  * @param {string} text  line to speak
  * @param {"done"|"needs_input"|"error"|"info"} kind
- * @param {object} meta  { agent?, lang?, provider?, force?, ...anything to log }
+ * @param {object} meta  { agent?, lang?, provider?, force?, queuedAt?, stillNeeded?, ...anything to log }
  * @param {object} deps  test seams: { playBuffer, fetch }
  */
 export async function speak(text, kind = "info", meta = {}, deps = {}) {
   ensureDirs();
   const base = config();
   const cfg = meta.agent ? agentConfig(base, meta.agent) : base;
-  let line = String(text || "").replace(/\s+/g, " ").trim();
+  let line = redact(String(text || "")).replace(/\s+/g, " ").trim();
   if (!line) return { skipped: "empty" };
   if (line.length > cfg.maxChars) line = plainFirstSentence(line, cfg.maxChars);
 
-  const { provider, force, queuedAt = now(), ...logMeta } = meta;
-  const blocked = dropReason(queuedAt, kind, cfg, force);
+  const { provider, force, queuedAt = now(), stillNeeded, ...logMeta } = meta;
+  const blocked = dropReason(queuedAt, kind, cfg, force, stillNeeded);
   if (blocked) {
     log({ skipped: blocked, kind, line, ...logMeta });
     echo(`[jarvis:skipped:${blocked}] (jarvis on to reset)`);
@@ -53,7 +56,7 @@ export async function speak(text, kind = "info", meta = {}, deps = {}) {
   }
 
   return withLock(async () => {
-    const late = dropReason(queuedAt, kind, cfg, force);
+    const late = dropReason(queuedAt, kind, cfg, force, stillNeeded);
     if (late) {
       log({ skipped: late, kind, line, ...logMeta });
       echo(`[jarvis:skipped:${late}]`);
@@ -66,6 +69,8 @@ export async function speak(text, kind = "info", meta = {}, deps = {}) {
       return { skipped: "duplicate" };
     }
     const lang = meta.lang || "en";
+    const began = now();
+    const stopped = () => (readJson(P.flushed, {}).at || 0) >= began; // Stop pressed mid-line
     const chain = provider ? [provider] : cfg.ttsProviders;
     const ctx = { cfg, lang, fetch: deps.fetch, playBuffer: deps.playBuffer || realPlayBuffer };
     let engine = "none";
@@ -74,7 +79,7 @@ export async function speak(text, kind = "info", meta = {}, deps = {}) {
     if (isDry()) {
       engine = "dry-run";
     } else {
-      if (cfg.chimes && CHIMES[kind] && fs.existsSync(CHIMES[kind])) play(CHIMES[kind]);
+      if (cfg.chimes && CHIMES[kind] && fs.existsSync(CHIMES[kind])) await play(CHIMES[kind]);
       for (const id of chain) {
         const e = getEngine(id);
         if (!e) {
@@ -89,6 +94,12 @@ export async function speak(text, kind = "info", meta = {}, deps = {}) {
           break;
         } catch (err) {
           const error = String(err?.message || err);
+          // A killed player looks like a failure; don't let Stop fall through to the next voice.
+          if (stopped()) {
+            log({ skipped: "stopped", kind, line, ...logMeta });
+            echo(`[jarvis:skipped:stopped]`);
+            return { skipped: "stopped" };
+          }
           failures.push(`${id}: ${error}`);
           log({ warn: "tts_failed", engine: id, error });
         }

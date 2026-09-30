@@ -17,4 +17,6 @@ export const P = {
   lock: path.join(HOME, "speak.lock"),
   sessions: path.join(HOME, "sessions"),
   tmp: path.join(HOME, "tmp"),
+  socket: path.join(HOME, "hub.sock"), // the desktop app (or `jarvis serve`) listens here
+  shim: path.join(HOME, "bin", "jarvis-hook"), // what hooks call when the hub is installed
 };

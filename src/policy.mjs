@@ -23,11 +23,16 @@ export function setMode(mode, minutes = 0) {
   writeJson(P.mode, mode === "on" ? { mode } : { mode, until: minutes ? now() + minutes * 60_000 : null });
 }
 
+// Kinds that may still speak during quiet hours. Default: only "needs you" pings.
+// `allow: []` makes quiet hours fully silent.
+export const QUIET_ALLOW_DEFAULT = ["needs_input"];
+export const quietAllows = (qh, kind) => (Array.isArray(qh?.allow) ? qh.allow : QUIET_ALLOW_DEFAULT).includes(kind);
+
 // Returns a skip reason, or null if this kind of line may be spoken now.
 export function policyBlock(kind, cfg, d = new Date()) {
   const mode = currentMode();
   if (mode === "off") return "mode_off";
   if (mode === "quiet" && kind !== "needs_input" && kind !== "error") return "mode_quiet";
-  if (inQuietHours(cfg.quietHours, d) && kind !== "needs_input") return "quiet_hours";
+  if (inQuietHours(cfg.quietHours, d) && !quietAllows(cfg.quietHours, kind)) return "quiet_hours";
   return null;
 }

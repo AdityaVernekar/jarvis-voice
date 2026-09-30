@@ -20,11 +20,11 @@ import { endsWithQuestion, normalizeEvent } from "./events.mjs";
 import { getSession, pruneSessions, updateSession } from "./sessions.mjs";
 
 /** Entry point for every agent. Returns the normalized events (handy for tests). */
-export async function ingest(agentId, payload, { deps = {} } = {}) {
+export async function ingest(agentId, payload, { deps = {}, foreground } = {}) {
   ensureDirs();
   const adapter = getAdapter(agentId);
   const events = (adapter.toEvents(payload || {}) || []).map((e) => normalizeEvent(e, agentId));
-  for (const ev of events) await ingestEvent(ev, { deps });
+  for (const ev of events) await ingestEvent(ev, { deps, ...(foreground !== undefined ? { foreground } : {}) });
   return events;
 }
 
@@ -41,10 +41,22 @@ export async function ingestEvent(ev, { foreground = process.env.JARVIS_FOREGROU
       turnStart: ev.at,
       spokeAfterStop: false,
       lastEvent: "turn_start",
+      activeAt: ev.at,
+      activeTool: null,
     });
     if (Math.random() < 0.05) pruneSessions();
     return { recorded: "turn_start" };
   }
+  if (ev.type === "activity") {
+    // Runs on every tool call, so it only touches the session file.
+    updateSession(ev.agent, ev.session, (cur) => ({
+      activeAt: ev.at,
+      activeTool: ev.tool || null,
+      ...(cur.status === "waiting" ? { status: "working" } : {}),
+    }));
+    return { recorded: "activity" };
+  }
+  if (ev.type === "turn_end") updateSession(ev.agent, ev.session, { activeAt: ev.at, activeTool: null });
   if (foreground) return processEvent(ev, deps);
   detach(ev);
   return { detached: true };
@@ -82,6 +94,16 @@ const guarded = (ev, patch) => (cur) => {
 
 const STATUS_FOR = { turn_end: "done", needs_input: "waiting", idle: "waiting", error: "error", info: null };
 
+// Has the user already dealt with this "needs you" event? True once the session moved on after
+// it: a new prompt, the end of the turn, or the tool it asked about running. Activity from a
+// different tool doesn't count, since parallel tool calls can finish while another one waits.
+export function answered(ev, session) {
+  if (!session?.activeAt || session.activeAt <= ev.at) return false;
+  if (!session.activeTool || !ev.tool) return true;
+  return session.activeTool.toLowerCase() === String(ev.tool).toLowerCase();
+}
+const NEEDS_YOU = new Set(["needs_input", "idle"]);
+
 /** Decide what to say for one event, update the registry, speak. */
 export async function processEvent(input, deps = {}) {
   const adapter = getAdapter(input.agent);
@@ -92,6 +114,10 @@ export async function processEvent(input, deps = {}) {
   const name = cfg.label || adapter.name;
   const who = cfg.announceAgent || cfg.label ? `${name}, ${project}` : project;
   const meta = { agent: ev.agent, session: ev.session, project, type: ev.type };
+  if (NEEDS_YOU.has(ev.type) && answered(ev, prev)) {
+    log({ skipped: "resolved", ...meta });
+    return { skipped: "resolved" };
+  }
   const base = { cwd: ev.cwd || prev.cwd || null, project, lastEvent: ev.type };
 
   let say = null; // { text, kind, lang, via? }
@@ -170,5 +196,6 @@ export async function processEvent(input, deps = {}) {
     log({ skipped: "agent_disabled", line, ...meta });
     return { skipped: "agent_disabled" };
   }
-  return speak(line, say.kind, { ...meta, lang: say.lang, via: say.via, queuedAt: ev.at }, deps);
+  const stillNeeded = NEEDS_YOU.has(ev.type) ? () => !answered(ev, getSession(ev.agent, ev.session)) : undefined;
+  return speak(line, say.kind, { ...meta, lang: say.lang, via: say.via, queuedAt: ev.at, stillNeeded }, deps);
 }

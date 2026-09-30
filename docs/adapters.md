@@ -8,16 +8,18 @@ An adapter connects one coding agent to the hub. It translates whatever the agen
 {
   agent: "my-agent",       // adapter id (required)
   session: "abc123",       // conversation or thread id; defaults to project, then cwd
-  type: "turn_end",        // turn_start | turn_end | needs_input | idle | error | info
+  type: "turn_end",        // turn_start | turn_end | needs_input | idle | error | info | activity
   cwd: "/path/to/repo",    // used to name the project out loud
   project: "checkout",     // explicit project name, overrides cwd
   text: "…",               // the agent's final message, to be summarised
   line: "…",               // exact words to speak, skips summarising
   message: "…",            // reason for needs_input or error
-  tool: "Bash",            // tool name for a permission prompt
+  tool: "Bash",            // tool name for a permission prompt, or the tool that just ran (activity)
   durationMs: 42000,       // turn length, if the agent knows it
 }
 ```
+
+Send `activity` (with `tool`) whenever your agent finishes a tool call if it can ask for approval. Jarvis then drops a pending `needs_input` for that tool instead of announcing a prompt you already answered. `activity` is never spoken.
 
 If your agent sends `turn_start`, Jarvis measures turn length itself and skips short turns. If it can't, send `durationMs` with `turn_end`, or every turn will be announced.
 

@@ -22,7 +22,7 @@
 | `sayVoice` | `"Samantha"` | macOS system voice |
 | `minTurnSeconds` | `30` | turns and `jarvis run` commands shorter than this stay silent |
 | `maxChars` | `200` | longer lines are cut to their first sentence |
-| `quietHours` | `{"start":"23:00","end":"08:00"}` | only `needs_input` is spoken; `null` disables |
+| `quietHours` | `{"start":"23:00","end":"08:00","allow":["needs_input"]}` | nightly window. Only kinds in `allow` are spoken: `[]` is completely silent, `["needs_input","error"]` also lets failures through. `null` turns quiet hours off. Set it with `jarvis quiet-hours` |
 | `chimes` | `true` | macOS system sound before each line |
 | `announceAgent` | `false` | prefix lines with the agent name |
 | `agents` | `{}` | per-agent overrides, below |
@@ -50,7 +50,7 @@ Adapter ids: `claude-code`, `codex`, `run` (for `jarvis run`), and whatever you 
 | `config.json` | the settings above |
 | `mode.json` | `on`, `quiet` or `off`, and when it ends |
 | `sessions/` | one JSON file per agent session, shown by `jarvis agents` |
-| `log.jsonl` | every spoken or skipped line, warnings and errors; API keys are redacted |
+| `log.jsonl` | every spoken or skipped line, warnings and errors; secrets are redacted |
 | `last-spoken.json` | the last line, for the 60-second duplicate check |
 | `flushed.json` | when `jarvis stop` last ran; lines queued before then are dropped |
 | `speak.lock/` | held while a line is playing; `jarvis stop` removes it |
@@ -64,3 +64,8 @@ Skip reasons you may see in `log.jsonl` include:
 - `busy`: the line never got the speaker
 - `duplicate_turn`: the same Codex turn was delivered twice
 - `forwarded_echo`: a chained notify called Jarvis back
+- `resolved`: a permission or idle alert you had already answered in the terminal
+
+## Secrets
+
+Agent messages can contain tokens, keys or connection strings. Jarvis strips anything secret-shaped before a line is spoken, logged, or sent to an LLM for a summary: provider keys (`sk-…`, `ghp_…`, `xoxb-…`, `AKIA…`, `AIza…`), JWTs, private key blocks, passwords in URLs, `NAME=value` pairs where the name contains key, secret, token or password, and any 32+ character string mixing letters and digits. The pattern list is in `src/util.mjs`; open an issue if a format slips through.

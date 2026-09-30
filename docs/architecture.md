@@ -30,10 +30,10 @@ jarvis.mjs, install.mjs   legacy entry points kept for hooks installed by 0.1
 
 1. An agent fires its hook. Claude Code pipes JSON to `jarvis hook claude-code`; Codex runs `jarvis codex '<json>'`.
 2. The adapter's `toEvents()` turns that payload into zero or more hub events. This runs in the agent's hook process, so it must be synchronous and cheap.
-3. `ingest()` normalizes each event. `turn_start` just marks the session as working and records the start time, then the hook exits. Anything else is written to `~/.jarvis-voice/tmp/` and handed to a detached `jarvis _worker` process.
-4. The worker runs `processEvent()`. It calls the adapter's optional `enrich()` (Claude Code reads the transcript here), applies per-agent settings, decides what to say, and updates the session registry.
+3. `ingest()` normalizes each event. `turn_start` just marks the session as working and records the start time, then the hook exits. `activity` (a tool finished running) only records the time and tool name. It is never spoken. Anything else is written to `~/.jarvis-voice/tmp/` and handed to a detached `jarvis _worker` process.
+4. The worker runs `processEvent()`. A `needs_input` or `idle` event is dropped as `resolved` if the session has moved on since it was raised: a new prompt, the end of the turn, or the tool it asked about running. Otherwise it calls the adapter's optional `enrich()` (Claude Code reads the transcript here), applies per-agent settings, decides what to say, and updates the session registry.
 5. `speak()` checks the mode and quiet hours, then waits for the global lock, so only one line plays at a time across every agent.
-6. Once it holds the lock, it checks again before speaking. The line is dropped if the user ran `jarvis off` or `jarvis stop` while it waited, if it has been queued for more than 2 minutes, or if the same words were spoken in the last 60 seconds. Otherwise it plays a chime and tries each engine in `ttsProviders` until one succeeds.
+6. Once it holds the lock, it checks again before speaking. The line is dropped if the user ran `jarvis off` or `jarvis stop` while it waited, if a "needs you" alert was answered in the meantime, if it has been queued for more than 2 minutes, or if the same words were spoken in the last 60 seconds. Otherwise it plays a chime and tries each engine in `ttsProviders` until one succeeds.
 7. A line that can't get the lock within 60 seconds is dropped and logged as `skipped: busy`.
 
 ## Codex notify chaining
@@ -47,6 +47,14 @@ Some notify wrappers call their own "previous notify" command, and after chainin
 
 A chain whose command is Jarvis itself is never forwarded to.
 
+## Answered alerts
+
+Claude Code asks for permission, and Jarvis says "api needs your permission to use Bash". If you're at the keyboard you approve it right away, and hearing the alert a few seconds later is just noise. So the Claude Code adapter also listens to `PostToolUse` and turns it into an `activity` event with the tool name.
+
+An alert counts as answered once the session's latest activity is newer than the alert and is for the same tool (or has no tool, like a new prompt or a turn end). Activity from a different tool doesn't count, because parallel tool calls can finish while another one is still waiting for you. The check runs when the worker starts and again inside the speaker lock, so an alert queued behind another line is dropped too.
+
+`PostToolUse` fires after every tool call, and the hook costs one short Node start (about 50 ms). Codex has no approval hook, so this only applies to agents that send `activity`.
+
 ## What gets said
 
 | Event | Spoken | Session status |
@@ -57,8 +65,9 @@ A chain whose command is Jarvis itself is never forwarded to.
 | `idle` | "<project> is waiting for you", unless the turn end was already announced | waiting |
 | `error` | `line`, a summary of `text`, or "hit an error" | error |
 | `info` | `line` or `text` as given | unchanged |
+| `activity` | nothing | working, if it was waiting |
 
-Quiet hours let `needs_input` through. `jarvis quiet` lets `needs_input` and `error` through. `jarvis off` silences everything. The registry is updated either way, so `jarvis agents` stays accurate.
+Quiet hours let the kinds in `quietHours.allow` through (`needs_input` by default, nothing with `jarvis quiet-hours --silent`). `jarvis quiet` lets `needs_input` and `error` through. `jarvis off` silences everything. The registry is updated either way, so `jarvis agents` stays accurate.
 
 ## Environment variables
 

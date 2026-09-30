@@ -13,11 +13,28 @@ export function ensureDirs() {
   for (const d of [HOME, P.sessions, P.tmp]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
 }
 
-// Strip anything key-shaped from provider error text before it is logged or shown.
+// Strip anything secret-shaped before it is spoken, logged, shown, or sent for a summary.
+// Used on agent messages as well as provider error text, so it errs on the side of removing.
+const SECRET_PATTERNS = [
+  [/\b(sk|pk|rk)[-_][A-Za-z0-9*_-]{6,}/g, "[redacted]"], // OpenAI, Stripe, Anthropic-style keys
+  [/\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g, "[redacted]"], // GitHub
+  [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, "[redacted]"], // Slack
+  [/\b(AKIA|ASIA)[0-9A-Z]{16}\b/g, "[redacted]"], // AWS access key ids
+  [/\bAIza[0-9A-Za-z_-]{35}/g, "[redacted]"], // Google API keys
+  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "[redacted]"], // JWTs
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g, "[redacted]"],
+  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s:@/]+:[^\s@/]+@/gi, "$1[redacted]@"], // credentials in URLs
+  // NAME=value where the name says it is secret: OPENAI_API_KEY=…, password: …, "token": "…"
+  [/\b([\w-]*(?:api[_-]?key|secret|token|passw(?:or)?d)[\w-]*)(["']?\s*[:=]\s*["']?)[^\s"',;]{4,}/gi, "$1$2[redacted]"],
+  [/\b(Bearer|key|token)(["':=\s]+)(?=[A-Za-z0-9*._-]*[0-9*])[A-Za-z0-9*._-]{8,}/gi, "$1$2[redacted]"],
+  // Long opaque strings (32+ chars mixing letters and digits) are almost never worth reading out.
+  [/\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{32,}\b/g, "[redacted]"],
+];
+
 export function redact(s) {
-  return String(s ?? "")
-    .replace(/\b(sk|pk|rk)[-_][A-Za-z0-9*_-]{6,}/g, "[redacted]")
-    .replace(/\b(Bearer|key|token)(["':=\s]+)(?=[A-Za-z0-9*._-]*[0-9*])[A-Za-z0-9*._-]{8,}/gi, "$1$2[redacted]");
+  let out = String(s ?? "");
+  for (const [re, sub] of SECRET_PATTERNS) out = out.replace(re, sub);
+  return out;
 }
 
 export function readJson(file, fallback) {

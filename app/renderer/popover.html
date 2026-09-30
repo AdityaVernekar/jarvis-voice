@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
+  <title>Jarvis Voice</title>
+  <link rel="stylesheet" href="popover.css" />
+</head>
+<body>
+  <main class="panel">
+    <header class="top">
+      <div class="brand">
+        <span class="wave" id="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="title">Jarvis</span>
+      </div>
+      <div class="seg" role="radiogroup" aria-label="Mode">
+        <button data-mode="on" role="radio">On</button>
+        <button data-mode="quiet" role="radio" title="Only “needs you” pings for an hour">Quiet</button>
+        <button data-mode="off" role="radio">Off</button>
+      </div>
+    </header>
+
+    <p class="status" id="status"></p>
+
+    <section class="connect" id="connect" hidden>
+      <p><strong>Connect your agents</strong><br />Jarvis adds hooks to Claude Code and Codex so they can tell you when they finish or need you. Anything already in your Codex <code>notify</code> keeps working.</p>
+      <button class="primary" id="connectBtn">Connect your agents</button>
+      <pre class="result" id="connectResult" hidden></pre>
+    </section>
+
+    <section class="list" id="list" aria-live="polite"></section>
+
+    <footer class="bottom">
+      <button class="ghost" id="stopBtn" title="Stop talking and drop everything queued">Stop talking</button>
+      <button class="ghost" id="testBtn">Test voice</button>
+      <button class="ghost" id="openBtn" title="Settings, agents, activity">Open app</button>
+      <span class="spacer"></span>
+      <button class="icon" id="moreBtn" title="More" aria-label="More">•••</button>
+    </footer>
+  </main>
+  <script src="popover.js"></script>
+</body>
+</html>

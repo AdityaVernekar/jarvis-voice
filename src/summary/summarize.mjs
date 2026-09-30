@@ -31,17 +31,20 @@ async function chat(provider, cfg, messages, fetch) {
 
 /** @returns {Promise<{line: string, via: string, lang: string}>} */
 export async function summarize(text, cfg, { fetch = globalThis.fetch } = {}) {
+  text = redact(text); // secrets never leave the machine, even for a summary
   const fallback = { line: plainFirstSentence(text) || "Finished.", via: "first-sentence", lang: "en" };
-  if (isDry() || !text) return fallback;
+  // "none": nothing leaves the machine; speak the agent's own first sentence.
+  if (isDry() || !text || cfg.summaryProvider === "none") return fallback;
   const lang = cfg.speakLanguage || "en";
   const order = [...new Set([cfg.summaryProvider, "openai"])].filter((n) => LLMS[n]);
   for (const provider of order) {
     try {
-      const line = await chat(provider, cfg, [
+      let line = await chat(provider, cfg, [
         { role: "system", content: SYSTEM + langInstruction(lang) },
         { role: "user", content: String(text).slice(-6000) },
       ], fetch);
       if (!line) continue;
+      line = redact(line);
       if (SCRIPT[lang] && !SCRIPT[lang].test(line)) {
         // Small models often answer in romanised Hindi. Ask once for a script rewrite.
         log({ warn: "summary_wrong_script", lang, provider, line });

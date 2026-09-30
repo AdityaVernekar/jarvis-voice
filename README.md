@@ -6,7 +6,7 @@ A voice hub for terminal coding agents. Start a task in Claude Code, another in 
 >
 > "billing needs your permission to use Bash."
 
-It sits between your agents and your speakers. Each agent's hooks send events to one hub. The hub tracks every session, writes a one-sentence summary of what the agent did, and speaks it through the first voice engine that works. Short turns stay silent, duplicate lines are dropped, and quiet hours let only the "I need you" pings through.
+It sits between your agents and your speakers. Each agent's hooks send events to one hub. The hub tracks every session, writes a one-sentence summary of what the agent did, and speaks it through the first voice engine that works. Short turns stay silent, duplicate lines are dropped, alerts you already answered are skipped, secrets are never read out, and quiet hours let only the "I need you" pings through (or nothing at all).
 
 Zero dependencies. Node 20 or newer. MIT licensed.
 
@@ -15,6 +15,10 @@ Zero dependencies. Node 20 or newer. MIT licensed.
 Running several agents at once turns you into a tab-watcher. You check a terminal, it's still thinking; you go back to something else, and meanwhile another agent has been blocked on a permission prompt for ten minutes. Jarvis removes the checking. You hear about the ones that matter and ignore the rest.
 
 ## Install
+
+**On a Mac without the terminal:** download the Mac app from [Releases](https://github.com/AdityaVernekar/jarvis-voice/releases), open **Agents** and click **Connect**. See [docs/desktop-app.md](docs/desktop-app.md) for the one-time "Open Anyway" step.
+
+**From source:**
 
 ```bash
 git clone https://github.com/AdityaVernekar/jarvis-voice.git
@@ -39,8 +43,9 @@ Keys are read at call time and never written to logs. With an OpenAI key, the ta
 
 | Agent | How it connects | Events |
 | --- | --- | --- |
-| Claude Code | `UserPromptSubmit`, `Stop` and `Notification` hooks in `~/.claude/settings.json` | turn start/end, permission prompts, idle |
+| Claude Code | `UserPromptSubmit`, `Stop`, `Notification` and `PostToolUse` hooks in `~/.claude/settings.json` | turn start/end, permission prompts, idle, and tool activity so answered prompts stay quiet |
 | Codex CLI | top-level `notify` in `~/.codex/config.toml` | turn end |
+| Claude Desktop (chats, Cowork) | a local MCP server (`jarvis mcp`) in `claude_desktop_config.json`; Claude calls its `jarvis_notify` tool and writes the line itself | done, needs you, error |
 | Anything else | `jarvis emit` or `jarvis run` | whatever you send |
 
 If Codex already has a `notify` command, the installer leaves it alone and tells you. `jarvis install --chain` keeps your command and adds Jarvis in front of it; `jarvis uninstall` puts yours back. The chain is safe with wrappers that call their own "previous notify" command, even when that command is Jarvis: each Codex turn is spoken once.
@@ -54,6 +59,8 @@ jarvis emit --agent my-bot --type needs_input --message "wants you to review the
 echo '{"agent":"ci","type":"error","project":"api","line":"API build failed on main."}' | jarvis emit
 jarvis run -- npm test             # speaks when a long command finishes or fails
 ```
+
+Claude Desktop has no hooks, so it relies on Claude choosing to call the tool at the end of real work. It usually does; quick chat replies stay silent on purpose. Quit and reopen Claude Desktop after connecting.
 
 To add first-class support for another agent, write an adapter. It is one small file; see [docs/adapters.md](docs/adapters.md).
 
@@ -75,11 +82,12 @@ STATUS    AGENT         PROJECT               AGE   LAST
 ## Commands
 
 ```text
-jarvis install [--only claude-code,codex] [--chain] [--env path/.env]
+jarvis install [--only claude-code,codex,claude-desktop] [--chain] [--env path/.env] [--hub | --node]
+jarvis env /path/to/.env   # where API keys are read from
 jarvis uninstall
 jarvis test [--provider smallest|openai|say] [--agent id]
 jarvis agents [--all] [--json]
-jarvis emit --agent <id> --type <turn_start|turn_end|needs_input|idle|error|info> [text…]
+jarvis emit --agent <id> --type <turn_start|turn_end|needs_input|idle|error|info|activity> [text…]
 jarvis run -- <command …>
 jarvis say "text" [--kind done|needs_input|error|info] [--provider id] [--lang code]
 jarvis voices [--gender female] [--accent indian] [--lang hi] [--std]
@@ -89,6 +97,11 @@ jarvis quiet [minutes]     # only "needs you" pings, default 60 min
 jarvis off [minutes]       # silence, default until `jarvis on`
 jarvis on
 jarvis stop                # stop talking now and drop every queued line
+jarvis quiet-hours 22:00-08:00 --silent            # nothing at night
+jarvis quiet-hours 22:00-08:00 --allow needs_input  # only "needs you" at night (default)
+jarvis quiet-hours off
+jarvis serve               # run the hub in the foreground (the Mac app does this for you)
+jarvis mcp                 # MCP server for Claude Desktop (added by `install --only claude-desktop`)
 jarvis status
 ```
 

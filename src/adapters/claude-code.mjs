@@ -4,9 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { sleep } from "../util.mjs";
-import { backup, isJarvisCommand, quote } from "./install-util.mjs";
+import { backup, commandPrefix, isJarvisCommand, quote } from "./install-util.mjs";
 
-const HOOK_EVENTS = ["UserPromptSubmit", "Stop", "Notification"];
+// PostToolUse tells Jarvis the agent is moving again, so a permission alert you already
+// answered in the terminal isn't read out after the fact.
+const HOOK_EVENTS = ["UserPromptSubmit", "Stop", "Notification", "PostToolUse"];
 const settingsFile = () => path.join(os.homedir(), ".claude", "settings.json");
 
 // Read the tail of the transcript and return the last assistant text block.
@@ -61,6 +63,8 @@ export default {
         if (perm) return [{ ...base, type: "needs_input", tool: perm[1] }];
         return [{ ...base, type: "needs_input", message: msg.replace(/^Claude\s+/i, "") || "needs your attention" }];
       }
+      case "PostToolUse":
+        return [{ ...base, type: "activity", tool: p.tool_name }];
       default:
         return []; // SubagentStop, PreToolUse, … are ignored
     }
@@ -77,6 +81,8 @@ export default {
     return { ...ev, text };
   },
 
+  configFile: settingsFile, // the file install() edits; the desktop app reads it to show hook status
+
   isInstalled() {
     try {
       return isJarvisCommand(fs.readFileSync(settingsFile(), "utf8").replace(/\\"/g, '"'));
@@ -85,7 +91,7 @@ export default {
     }
   },
 
-  install({ node, bin, uninstall = false }) {
+  install({ node, bin, cmd, uninstall = false }) {
     const file = settingsFile();
     if (uninstall && !fs.existsSync(file)) return [];
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -98,13 +104,13 @@ export default {
       }
     }
     const b = backup(file);
-    const cmd = `${quote(node)} ${quote(bin)} hook claude-code`;
+    const command = `${commandPrefix({ cmd, node, bin }).map(quote).join(" ")} hook claude-code`;
     settings.hooks ||= {};
     for (const ev of HOOK_EVENTS) {
       const groups = (settings.hooks[ev] || [])
         .map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !isJarvisCommand(h.command)) }))
         .filter((g) => g.hooks.length);
-      if (!uninstall) groups.push({ hooks: [{ type: "command", command: cmd, timeout: 10 }] });
+      if (!uninstall) groups.push({ hooks: [{ type: "command", command, timeout: 10 }] });
       if (groups.length) settings.hooks[ev] = groups;
       else delete settings.hooks[ev];
     }

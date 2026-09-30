@@ -8,7 +8,7 @@ export const DEFAULTS = {
   smallest: { model: "lightning_v3.1_pro", voice: "meher", speed: 1.0, sampleRate: 24000 },
   smallestTimeoutMs: 8000,
   speakLanguage: "en", // en | hinglish | hi | ta | mr | … (summaries are written in this language)
-  summaryProvider: "openai", // openai | smallest (Electron; not on every Smallest plan)
+  summaryProvider: "openai", // openai | smallest (Electron; not on every Smallest plan) | none (first sentence, nothing sent)
   summaryModel: "gpt-4o-mini",
   summaryTimeoutMs: 6000,
   ttsModel: "gpt-4o-mini-tts",
@@ -18,7 +18,8 @@ export const DEFAULTS = {
   sayVoice: "Samantha", // macOS last resort; Hindi lines use Lekha
   minTurnSeconds: 30, // turns and `run` commands shorter than this stay silent
   maxChars: 200,
-  quietHours: { start: "23:00", end: "08:00" }, // only needs_input gets through; null to disable
+  // During quiet hours only the kinds in `allow` are spoken. allow: [] = total silence; null disables.
+  quietHours: { start: "23:00", end: "08:00", allow: ["needs_input"] },
   chimes: true,
   announceAgent: false, // prefix lines with the agent name ("Codex, checkout. …")
   // Per-agent overrides, keyed by adapter id:

@@ -3,18 +3,20 @@
 //   {
 //     agent:      "claude-code" | "codex" | "aider" | any id      (required)
 //     session:    id of the conversation/thread within that agent (default: project)
-//     type:       "turn_start" | "turn_end" | "needs_input" | "idle" | "error" | "info"
+//     type:       "turn_start" | "turn_end" | "needs_input" | "idle" | "error" | "info" | "activity"
 //     cwd:        working directory (used for the spoken project name)
 //     project:    explicit project name (overrides cwd)
 //     text:       the agent's own final message, to be summarised
 //     line:       an exact line to speak (skips summarising)
 //     message:    free-text reason for needs_input / error
-//     tool:       tool name for a permission request
+//     tool:       tool name for a permission request, or the tool that just ran (activity)
 //     durationMs: how long the turn took, if the agent reports it
 //     at:         epoch ms
 //   }
 
-export const EVENT_TYPES = ["turn_start", "turn_end", "needs_input", "idle", "error", "info"];
+// "activity" means the agent is moving again (a tool just ran). It is never spoken; it withdraws
+// a pending "needs you" alert the user already answered in the terminal.
+export const EVENT_TYPES = ["turn_start", "turn_end", "needs_input", "idle", "error", "info", "activity"];
 
 export function normalizeEvent(e, agentId) {
   const ev = { ...e };

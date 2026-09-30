@@ -54,3 +54,37 @@ test("findVoice searches every catalog", async () => {
   assert.equal(v.model, "lightning_v3.1");
   assert.deepEqual(v.tags.language, ["hindi"]);
 });
+
+test("Stop mid-line doesn't fall through and replay the line on the next engine", async () => {
+  const { stopSpeaking } = await import("../src/control.mjs");
+  const played = [];
+  const fetch = async () => audio("audio/wav");
+  // The player is killed by Stop, which surfaces as a failed engine.
+  const playBuffer = async (b, ext) => {
+    played.push(ext);
+    stopSpeaking();
+    throw new Error("player exited 143");
+  };
+  const r = await speak("Stop me.", "done", { force: true }, { fetch, playBuffer });
+  assert.equal(r.skipped, "stopped");
+  assert.deepEqual(played, [".wav"], "OpenAI never ran");
+});
+
+test("playback is async: the event loop keeps running while a line plays", async () => {
+  const { run } = await import("../src/voice/play.mjs");
+  let ticks = 0;
+  const t = setInterval(() => ticks++, 10);
+  const ok = await run("sleep", ["0.3"]);
+  clearInterval(t);
+  assert.equal(ok, true);
+  assert.ok(ticks >= 10, `timers ran during playback (${ticks})`);
+});
+
+test("summaryProvider none never calls an LLM", async () => {
+  const { summarize } = await import("../src/summary/summarize.mjs");
+  let called = 0;
+  const s = await summarize("Shipped the new checkout. Tests pass.", { ...config(), summaryProvider: "none" }, { fetch: async () => (called++, audio("x")) });
+  assert.equal(called, 0);
+  assert.equal(s.via, "first-sentence");
+  assert.equal(s.line, "Shipped the new checkout.");
+});
