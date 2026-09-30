@@ -1,5 +1,14 @@
+# secrets
 .env
+.env.*
+!.env.example
+
+# local artifacts
 node_modules/
 *.mp3
 *.wav
 samples/
+*.bak-jarvis-*
+.DS_Store
+coverage/
+*.log

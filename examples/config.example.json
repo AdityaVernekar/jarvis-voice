@@ -1,0 +1,17 @@
+{
+  "envFile": "/path/to/.env",
+  "ttsProviders": ["smallest", "openai", "say"],
+  "smallest": { "model": "lightning_v3.1_pro", "voice": "meher", "speed": 1.0 },
+  "speakLanguage": "en",
+  "summaryProvider": "openai",
+  "summaryModel": "gpt-4o-mini",
+  "minTurnSeconds": 30,
+  "quietHours": { "start": "23:00", "end": "08:00" },
+  "chimes": true,
+  "announceAgent": true,
+  "agents": {
+    "claude-code": { "label": "Claude" },
+    "codex": { "voice": "tabitha", "minTurnSeconds": 0 },
+    "aider": { "enabled": false }
+  }
+}
