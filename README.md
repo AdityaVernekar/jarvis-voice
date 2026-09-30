@@ -1,86 +1,160 @@
-# Jarvis Voice
+# jarvis-voice
 
-Spoken pings for terminal coding agents. When Claude Code or Codex CLI finishes a long task or needs you, Jarvis says so out loud, e.g. *"lexsis storefront. I refactored the cart code and need your input on debounce timing."* It works in any terminal (Terminal, iTerm, Warp, Ghostty, VS Code, Cursor) because it hooks into the agents, not the terminal.
+A voice hub for terminal coding agents. Start a task in Claude Code, another in Codex, walk away, and Jarvis tells you out loud when one of them finishes or needs you:
 
-Input stays yours: dictate replies with Wispr Flow as usual.
+> "checkout service. Refactored the cart drawer, all tests pass."
+>
+> "billing needs your permission to use Bash."
 
-## What it does
+It sits between your agents and your speakers. Each agent's hooks send events to one hub. The hub tracks every session, writes a one-sentence summary of what the agent did, and speaks it through the first voice engine that works. Short turns stay silent, duplicate lines are dropped, and quiet hours let only the "I need you" pings through.
 
-| Situation | What you hear |
-|---|---|
-| Claude Code turn finishes after ≥ 30 s | Chime + project name + one-sentence summary |
-| Claude Code needs permission | Chime + "<project> needs your permission to use Bash." |
-| Claude Code idle, waiting on you (and hasn't already announced) | "<project> is waiting for you." |
-| Codex CLI turn finishes | Chime + project name + summary (a "needs input" chime if it ended on a question) |
-| `jarvis run -- <cmd>` takes ≥ 30 s | "<project>. npm test finished." / "…failed." |
+Zero dependencies. Node 20 or newer. MIT licensed.
 
-Quick turns stay silent. The same line twice within 60 s is skipped. Multiple sessions queue up instead of talking over each other. Quiet hours (23:00–08:00) let only "needs input" through.
+## Why
 
-Voice: [Smallest.ai](https://smallest.ai) Lightning v3.1 Pro (default `meher`, an Indian female voice that also speaks Hindi and Hinglish), usually under a second from request to audio. If Smallest fails (bad key, busy, network), it falls back to OpenAI `gpt-4o-mini-tts` (`nova`), then to the macOS `say` voice. Summaries: `gpt-4o-mini`. Only the short summary input and the spoken line leave your machine.
+Running several agents at once turns you into a tab-watcher. You check a terminal, it's still thinking; you go back to something else, and meanwhile another agent has been blocked on a permission prompt for ten minutes. Jarvis removes the checking. You hear about the ones that matter and ignore the rest.
 
-Languages: `jarvis lang hinglish` makes summaries come out as natural Hinglish ("cart drawer का refactor हो गया, सारे tests pass हैं…"). `hi`, `ta`, `mr`, `kn` and others use their native script.
-
-## Install (macOS, Node ≥ 20)
+## Install
 
 ```bash
-cd tools/jarvis-voice
-node install.mjs                  # or: node install.mjs --env /path/to/.env
-echo "alias jarvis='node $(pwd)/jarvis.mjs'" >> ~/.zshrc && source ~/.zshrc
-jarvis test                       # you should hear Jarvis
+git clone https://github.com/AdityaVernekar/jarvis-voice.git
+cd jarvis-voice
+node bin/jarvis.mjs install        # hooks for Claude Code and Codex, backs up every file it edits
+npm link                           # optional: puts `jarvis` on your PATH
+jarvis test                        # you should hear Jarvis
 ```
 
-The installer adds hooks to `~/.claude/settings.json` and a `notify` line to `~/.codex/config.toml`, backing up both first. It never overwrites an existing Codex `notify` by default. Re-run with `--chain` to keep yours: Jarvis takes the slot, speaks, then forwards the same event to your original command, and `--uninstall` puts the original back.
+Restart any running Claude Code or Codex sessions so they pick up the hooks.
 
-Paste the setup lines one at a time (or open a new tab after adding the alias). zsh reads a multi-line paste as one block, so `jarvis` isn't defined yet when that line is checked. Restart running agent sessions afterwards. To remove everything: `node install.mjs --uninstall`.
+Voice and summaries get better with API keys, but both are optional. Put them in your environment or in a `.env` file (see `.env.example`), then point Jarvis at it with `jarvis install --env /path/to/.env`:
 
-Keys (`SMALLEST_API_KEY`, `OPENAI_API_KEY`) are read from the environment, then from the `envFile` in `~/.jarvis-voice/config.json`, then from `~/.jarvis-voice/.env`. Either one alone is enough. Smallest's base plan allows one TTS request at a time per account, so give Jarvis its own key if you use Smallest elsewhere.
+| Key | Used for | Without it |
+| --- | --- | --- |
+| `SMALLEST_API_KEY` | [Smallest.ai](https://smallest.ai) Lightning voices, including Indian languages | falls through to OpenAI or the system voice |
+| `OPENAI_API_KEY` | one-sentence summaries (gpt-4o-mini) and OpenAI TTS | first sentence of the agent's message, system voice |
 
-## Everyday commands
+Keys are read at call time and never written to logs. With an OpenAI key, the tail of each agent's final message (up to 6,000 characters) is sent to OpenAI to write the summary; leave the key unset if your code can't leave your machine. [SECURITY.md](SECURITY.md) has the details.
+
+## Agents
+
+| Agent | How it connects | Events |
+| --- | --- | --- |
+| Claude Code | `UserPromptSubmit`, `Stop` and `Notification` hooks in `~/.claude/settings.json` | turn start/end, permission prompts, idle |
+| Codex CLI | top-level `notify` in `~/.codex/config.toml` | turn end |
+| Anything else | `jarvis emit` or `jarvis run` | whatever you send |
+
+If Codex already has a `notify` command, the installer leaves it alone and tells you. `jarvis install --chain` keeps your command and adds Jarvis in front of it; `jarvis uninstall` puts yours back. The chain is safe with wrappers that call their own "previous notify" command, even when that command is Jarvis: each Codex turn is spoken once.
+
+Any tool that can run a shell command can talk to the hub:
 
 ```bash
-jarvis quiet 60     # only "needs input" pings for an hour
-jarvis off          # silence until `jarvis on`
+jarvis emit --agent aider --type turn_start --project docs-site
+jarvis emit --agent aider --type turn_end   --project docs-site "Rewrote the navigation and fixed three broken links."
+jarvis emit --agent my-bot --type needs_input --message "wants you to review the migration"
+echo '{"agent":"ci","type":"error","project":"api","line":"API build failed on main."}' | jarvis emit
+jarvis run -- npm test             # speaks when a long command finishes or fails
+```
+
+To add first-class support for another agent, write an adapter. It is one small file; see [docs/adapters.md](docs/adapters.md).
+
+## See every agent at once
+
+```text
+$ jarvis agents
+STATUS    AGENT         PROJECT               AGE   LAST
+● working Claude Code   checkout service      12s
+◆ waiting Codex         billing               3m    billing. Should I also migrate the invoices table?
+◆ waiting Claude Code   api                   8m    api needs your permission to use Bash.
+✓ done    Aider         docs-site             21m   docs-site. Rewrote the navigation and fixed three broken links.
+
+1 working, 2 waiting on you, 4 total
+```
+
+`jarvis agents --all` includes sessions older than 24 hours; `--json` is for scripts and status bars.
+
+## Commands
+
+```text
+jarvis install [--only claude-code,codex] [--chain] [--env path/.env]
+jarvis uninstall
+jarvis test [--provider smallest|openai|say] [--agent id]
+jarvis agents [--all] [--json]
+jarvis emit --agent <id> --type <turn_start|turn_end|needs_input|idle|error|info> [text…]
+jarvis run -- <command …>
+jarvis say "text" [--kind done|needs_input|error|info] [--provider id] [--lang code]
+jarvis voices [--gender female] [--accent indian] [--lang hi] [--std]
+jarvis voice <id> [--agent id]
+jarvis lang <en|hinglish|hi|ta|mr|es|…>
+jarvis quiet [minutes]     # only "needs you" pings, default 60 min
+jarvis off [minutes]       # silence, default until `jarvis on`
 jarvis on
-jarvis status       # mode, keys, voice, language, last engine used
-jarvis say "text" --kind done|needs_input|error|info [--provider smallest|openai|say]
-jarvis run -- npm run build
-
-jarvis voices --gender female --accent indian   # browse Smallest voices (--lang hi, --std)
-jarvis voice sophie                             # British female; kaitlyn = American
-jarvis lang hinglish                            # en | hinglish | hi | ta | mr | …
-jarvis test --provider smallest                 # force one engine, prints latency
+jarvis stop                # stop talking now and drop every queued line
+jarvis status
 ```
 
-## Config (`~/.jarvis-voice/config.json`)
+## A different voice per agent
+
+When two agents share your speakers, it helps to hear which one is talking.
+
+```bash
+jarvis voices --gender female         # browse the Smallest catalog
+jarvis voice <voice-id> --agent codex  # Codex gets its own voice
+```
+
+Or in `~/.jarvis-voice/config.json`:
 
 ```json
 {
-  "ttsProviders": ["smallest", "openai", "say"],
-  "smallest": { "model": "lightning_v3.1_pro", "voice": "meher", "speed": 1.0 },
-  "speakLanguage": "en",
-  "voice": "nova",
-  "sayVoice": "Samantha",
-  "minTurnSeconds": 30,
-  "quietHours": { "start": "23:00", "end": "08:00" },
-  "chimes": true
+  "announceAgent": true,
+  "agents": {
+    "claude-code": { "label": "Claude" },
+    "codex": { "voice": "<voice-id>", "minTurnSeconds": 0 },
+    "aider": { "enabled": false }
+  }
 }
 ```
 
-Logs go to `~/.jarvis-voice/log.jsonl`. Every spoken, skipped or failed event is logged with the reason, so `jarvis status` tells you why something did or didn't speak.
+With `announceAgent` on, lines start with the agent name: "Codex, billing. Migrated the invoices table."
 
-## 5-minute Mac check
+## Languages
 
-1. `jarvis test`: you hear a Glass chime, then the OpenAI voice. (If you only hear the robotic voice, run `jarvis status` and check `openaiKey`.)
-2. Wi-Fi off, then `jarvis say hello`: you hear the macOS `say` voice.
-3. In Claude Code, ask for something quick ("what's 2+2"): silence.
-4. Ask for something that takes over 30 s: chime and summary when it finishes.
-5. Trigger a permission prompt (e.g. a Bash command in default mode): "needs your permission".
-6. In Codex CLI, run any task: a summary when the turn completes.
-7. `jarvis quiet 5`, then repeat step 4: silence. `jarvis on` to restore.
+`jarvis lang hinglish` makes summaries sound the way many Indian developers talk: Hindi in Devanagari with technical words left in English. `jarvis lang hi`, `ta`, `mr`, `es`, `fr` and about 30 others work too. Jarvis checks that the summary came back in the right script and asks for a rewrite once if it didn't. `jarvis voices --lang hi` lists voices trained on a language.
+
+## Configuration
+
+Everything lives in `~/.jarvis-voice/` (override with `JARVIS_HOME`): `config.json`, a session registry, and `log.jsonl`. The full list of settings is in [docs/configuration.md](docs/configuration.md); a starting point is in [examples/config.example.json](examples/config.example.json).
+
+## How it works
+
+```text
+Claude Code hook ─┐
+Codex notify ─────┼─► adapter ─► hub ─► session registry ─► jarvis agents
+jarvis emit/run ──┘                └─► worker ─► summary ─► voice engine chain ─► speaker
+```
+
+Hooks return within milliseconds. Transcript reads, LLM calls and audio all happen in a detached worker, so Jarvis never slows an agent down. Only one line plays at a time across all agents. [docs/architecture.md](docs/architecture.md) has the details, and [docs/engines.md](docs/engines.md) covers adding a voice engine.
+
+## Platform support
+
+macOS works out of the box (`afplay`, `say`). On Linux, install one of `paplay`, `aplay`, `ffplay` or `mpg123` for playback and `espeak-ng` or `spd-say` for the offline voice. Windows is untested; WSL with PulseAudio should work.
 
 ## Known limits
 
-- Codex's `notify` only fires on turn completion and sends no start time, so every Codex turn is announced (use `jarvis quiet` if that's too chatty). Codex approval prompts don't trigger a ping.
-- The installer pins the Node binary path it ran with. If you switch Node versions with nvm, re-run `node install.mjs`.
-- Smallest's Electron LLM (`"summaryProvider": "smallest"`) returns 403 on the base plan. When it does, Jarvis uses OpenAI for the summary automatically.
-- macOS only for audio (`afplay`/`say`). On other systems it logs what it would have said.
+- Codex's `notify` only fires at the end of a turn and sends no start time, so every Codex turn is announced. Set `agents.codex.minTurnSeconds` or use `jarvis quiet` if that's too chatty. Codex approval prompts don't trigger a ping yet.
+- The installer records the path of the Node binary it ran with. If you switch Node versions with nvm, run `jarvis install` again.
+- Smallest's Electron LLM (`"summaryProvider": "smallest"`) isn't available on every plan. When it returns 403, Jarvis uses OpenAI for the summary.
+- Smallest allows one TTS request at a time per account. Jarvis already serialises its own speech, but another app using the same key can cause a fallback to the next engine.
+
+## Troubleshooting
+
+- **It keeps repeating a line, or is reading out old ones.** Run `jarvis stop` to go silent and clear the queue, then `jarvis on`. `jarvis status` shows the last few log entries and why lines were skipped. If you're on a version before this fix and use `--chain`, update and re-run `jarvis install --chain`.
+- **Nothing is spoken.** Run `jarvis status` and check `mode`, `quietHoursNow` and the keys. Then run `jarvis test --provider say` to rule out the network.
+- **A line arrives late or not at all while several agents are busy.** Lines are dropped once they've waited 2 minutes, so you never hear stale news. The log shows `skipped: stale` or `skipped: busy`.
+
+## Contributing
+
+Adapters for more agents (Aider, Cursor CLI, Gemini CLI, OpenCode, Goose), more voice engines and more languages are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Run the tests with `npm test`.
+
+## License
+
+[MIT](LICENSE)
