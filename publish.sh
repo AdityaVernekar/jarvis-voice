@@ -21,17 +21,22 @@ FULL="$OWNER/$REPO"
 # Copy into a clean temp dir so the repo never includes llm-wiki history or .env files.
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-cp "$SRC"/{jarvis.mjs,install.mjs,README.md,PLAN.md,package.json,.gitignore,publish.sh} "$WORK"/
-cd "$WORK"
-git init -q -b main
-git add -A
-git commit -q -m "Jarvis voice: spoken pings for Claude Code and Codex CLI"
+FILES=(jarvis.mjs install.mjs README.md PLAN.md SMALLEST_PLAN.md package.json .gitignore publish.sh)
+MSG="${MSG:-Smallest.ai voices, Hinglish and multi-language summaries, engine fallback chain}"
 
 if gh repo view "$FULL" >/dev/null 2>&1; then
-  echo "• $FULL already exists; pushing to it"
-  git remote add origin "https://github.com/$FULL.git"
-  git push -u origin main
+  echo "• $FULL exists; pushing an update"
+  gh repo clone "$FULL" "$WORK/repo" -- -q
+  cd "$WORK/repo"
+  for f in "${FILES[@]}"; do cp "$SRC/$f" .; done
+  git add -A
+  if git diff --cached --quiet; then echo "• nothing changed"; else git commit -q -m "$MSG" && git push -q; fi
 else
+  for f in "${FILES[@]}"; do cp "$SRC/$f" "$WORK"/; done
+  cd "$WORK"
+  git init -q -b main
+  git add -A
+  git commit -q -m "Jarvis voice: spoken pings for Claude Code and Codex CLI"
   gh repo create "$FULL" "--$VISIBILITY" --source . --push \
     --description "Spoken pings for terminal coding agents (Claude Code, Codex CLI)"
 fi
