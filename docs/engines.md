@@ -1,10 +1,10 @@
 # Voice engines
 
-Jarvis tries each engine in `ttsProviders` (default `["smallest", "openai", "say"]`) until one plays the line.
+Earpiece tries each engine in `ttsProviders` (default `["smallest", "openai", "say"]`) until one plays the line.
 
 | Engine | Needs | Notes |
 | --- | --- | --- |
-| `smallest` | `SMALLEST_API_KEY` | Lightning v3.1 and v3.1 Pro voices, strong on Indian languages. `jarvis voices` lists them. One request at a time per account. |
+| `smallest` | `SMALLEST_API_KEY` | Lightning v3.1 and v3.1 Pro voices, strong on Indian languages. `earpiece voices` lists them. One request at a time per account. |
 | `openai` | `OPENAI_API_KEY` | `gpt-4o-mini-tts` with `voice` and `voiceInstructions` from config. |
 | `say` | nothing | macOS `say` (Hindi lines use Lekha), else `espeak-ng`, `espeak` or `spd-say`. |
 
@@ -27,6 +27,8 @@ export default {
   },
 };
 ```
+
+The on-screen card and the app's "speaking" indicator switch on when audio is about to play, not while you wait on the API. `playBuffer` does this for you. If your engine plays audio some other way (a subprocess, a stream), call `await ready?.()` from the same context object just before the sound starts.
 
 `lang` is the spoken language code (`en`, `hi`, `ta`, …). Use the injected `fetch` and `playBuffer` rather than globals so tests can stub them. Register the engine in `src/voice/engines/index.mjs`, then add it to `ttsProviders`.
 

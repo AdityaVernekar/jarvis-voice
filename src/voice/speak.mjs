@@ -1,5 +1,6 @@
 // speak(): policy check, cross-process lock, duplicate suppression, then the engine chain.
 import fs from "node:fs";
+import { SILENT_REASONS, showCard } from "../card.mjs";
 import { agentConfig, config } from "../config.mjs";
 import { withLock } from "../lock.mjs";
 import { P } from "../paths.mjs";
@@ -23,7 +24,7 @@ export const STALE_MS = 2 * 60_000;
 // answered in the terminal while it waited.
 function dropReason(queuedAt, kind, cfg, force, stillNeeded) {
   if (force) return null;
-  const blocked = policyBlock(kind, cfg); // the user may have run `jarvis off` while we waited
+  const blocked = policyBlock(kind, cfg); // the user may have run `earpiece off` while we waited
   if (blocked) return blocked;
   if (queuedAt) {
     if (queuedAt <= (readJson(P.flushed, {}).at || 0)) return "flushed";
@@ -49,37 +50,65 @@ export async function speak(text, kind = "info", meta = {}, deps = {}) {
 
   const { provider, force, queuedAt = now(), stillNeeded, ...logMeta } = meta;
   const blocked = dropReason(queuedAt, kind, cfg, force, stillNeeded);
+  const card = { line, kind, agent: logMeta.agent, project: logMeta.project, session: logMeta.session };
   if (blocked) {
+    if (SILENT_REASONS.has(blocked)) showCard({ ...card, state: "silent", reason: blocked });
     log({ skipped: blocked, kind, line, ...logMeta });
-    echo(`[jarvis:skipped:${blocked}] (jarvis on to reset)`);
+    echo(`[earpiece:skipped:${blocked}] (earpiece on to reset)`);
     return { skipped: blocked };
   }
 
   return withLock(async () => {
     const late = dropReason(queuedAt, kind, cfg, force, stillNeeded);
     if (late) {
+      if (SILENT_REASONS.has(late)) showCard({ ...card, state: "silent", reason: late });
       log({ skipped: late, kind, line, ...logMeta });
-      echo(`[jarvis:skipped:${late}]`);
+      echo(`[earpiece:skipped:${late}]`);
       return { skipped: late };
     }
     const last = readJson(P.last, {});
     if (!force && last.line === line && now() - (last.at || 0) < DUPLICATE_WINDOW_MS) {
       log({ skipped: "duplicate", kind, line, ...logMeta });
-      echo(`[jarvis:skipped:duplicate] said this <60s ago`);
+      echo(`[earpiece:skipped:duplicate] said this <60s ago`);
       return { skipped: "duplicate" };
     }
     const lang = meta.lang || "en";
     const began = now();
     const stopped = () => (readJson(P.flushed, {}).at || 0) >= began; // Stop pressed mid-line
     const chain = provider ? [provider] : cfg.ttsProviders;
-    const ctx = { cfg, lang, fetch: deps.fetch, playBuffer: deps.playBuffer || realPlayBuffer };
+
+    // The card (and the app's "speaking" indicator, which reads the card) must not appear while we
+    // are still waiting on a TTS API: the voice hasn't started, and a slow or hung provider would
+    // leave the window claiming to talk in silence. Engines call ready() the moment audio is
+    // in hand and about to play; playBuffer() does it for them.
+    let chimeDone = Promise.resolve();
+    const ready = async () => {
+      await chimeDone; // the voice starts after the chime, not over it
+      // Stop pressed while the API was still working. Strictly after we began: a marker written in
+      // the same millisecond belongs to an earlier Stop and was already handled by dropReason().
+      if ((readJson(P.flushed, {}).at || 0) > began) throw new Error("stopped");
+      card.id = showCard({ ...card, state: "speaking" });
+    };
+    const basePlay = deps.playBuffer || realPlayBuffer;
+    const ctx = {
+      cfg,
+      lang,
+      fetch: deps.fetch,
+      ready,
+      playBuffer: async (buf, ...rest) => {
+        await ready();
+        return basePlay(buf, ...rest);
+      },
+    };
     let engine = "none";
     let ms = null;
     const failures = [];
     if (isDry()) {
       engine = "dry-run";
+      await ready();
     } else {
-      if (cfg.chimes && CHIMES[kind] && fs.existsSync(CHIMES[kind])) await play(CHIMES[kind]);
+      // The chime plays while the TTS request is in flight instead of delaying it.
+      if (cfg.chimes && CHIMES[kind] && fs.existsSync(CHIMES[kind])) chimeDone = play(CHIMES[kind]).catch(() => false);
       for (const id of chain) {
         const e = getEngine(id);
         if (!e) {
@@ -96,8 +125,9 @@ export async function speak(text, kind = "info", meta = {}, deps = {}) {
           const error = String(err?.message || err);
           // A killed player looks like a failure; don't let Stop fall through to the next voice.
           if (stopped()) {
+            if (card.id) showCard({ ...card, state: "stopped" }); // only if the card was ever shown
             log({ skipped: "stopped", kind, line, ...logMeta });
-            echo(`[jarvis:skipped:stopped]`);
+            echo(`[earpiece:skipped:stopped]`);
             return { skipped: "stopped" };
           }
           failures.push(`${id}: ${error}`);
@@ -105,15 +135,24 @@ export async function speak(text, kind = "info", meta = {}, deps = {}) {
         }
       }
     }
+    for (const f of failures) echo(`[earpiece:fallback] ${f}`);
+    if (engine === "none") {
+      // Every voice failed or timed out, so nothing was said. Don't claim it was: show the line
+      // as text with a "no voice" chip, and don't record it as spoken (a retry isn't a duplicate).
+      showCard({ ...card, state: "silent", reason: "voice_failed" });
+      log({ skipped: "voice_failed", kind, line, failures, ...logMeta });
+      echo(`[earpiece:skipped:voice_failed] ${line}`);
+      return { skipped: "voice_failed", engine, ms, failures };
+    }
     writeJson(P.last, { line, at: now(), kind });
+    showCard({ ...card, state: "spoken" });
     log({ spoke: line, kind, engine, lang, ms, ...logMeta });
-    for (const f of failures) echo(`[jarvis:fallback] ${f}`);
-    echo(`[jarvis:${engine}:${kind}] ${line}`);
+    echo(`[earpiece:${engine}:${kind}] ${line}`);
     return { spoke: line, engine, ms, failures };
   }).catch((e) => {
     if (e?.code !== "ELOCKTIMEOUT") throw e;
     log({ skipped: "busy", kind, line, ...logMeta });
-    echo(`[jarvis:skipped:busy] another line held the speaker too long`);
+    echo(`[earpiece:skipped:busy] another line held the speaker too long`);
     return { skipped: "busy" };
   });
 }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
-  <title>Jarvis Voice</title>
+  <title>Earpiece</title>
   <link rel="stylesheet" href="app.css" />
 </head>
 <body>
@@ -12,7 +12,7 @@
       <div class="drag sidebar-top"></div>
       <div class="brand">
         <span class="wave" id="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-        <span>Jarvis Voice</span>
+        <span>Earpiece</span>
       </div>
       <ul class="nav" id="nav">
         <li><button data-section="overview"><svg viewBox="0 0 20 20"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/></svg>Overview<span class="badge" id="navWaiting" hidden></span></button></li>
@@ -35,6 +35,7 @@
     </main>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="logos.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -28,7 +28,7 @@ jobs:
           npx electron-builder --mac --universal --publish never
       - name: Check the signature
         working-directory: app
-        run: codesign --verify --deep --strict --verbose=2 "dist/mac-universal/Jarvis Voice.app"
+        run: codesign --verify --deep --strict --verbose=2 "dist/mac-universal/Earpiece.app"
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:

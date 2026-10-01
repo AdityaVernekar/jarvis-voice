@@ -1,6 +1,6 @@
 # Configuration
 
-`~/.jarvis-voice/config.json` (or `$JARVIS_HOME/config.json`). Every key is optional. `jarvis install`, `jarvis voice` and `jarvis lang` edit it for you.
+`~/.earpiece/config.json` (or `$EARPIECE_HOME/config.json`). Every key is optional. `earpiece install`, `earpiece voice` and `earpiece lang` edit it for you.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -20,13 +20,14 @@
 | `voiceInstructions` | calm, brief | OpenAI TTS style prompt |
 | `ttsTimeoutMs` | `15000` | |
 | `sayVoice` | `"Samantha"` | macOS system voice |
-| `minTurnSeconds` | `30` | turns and `jarvis run` commands shorter than this stay silent |
+| `minTurnSeconds` | `30` | turns and `earpiece run` commands shorter than this stay silent |
 | `maxChars` | `200` | longer lines are cut to their first sentence |
-| `quietHours` | `{"start":"23:00","end":"08:00","allow":["needs_input"]}` | nightly window. Only kinds in `allow` are spoken: `[]` is completely silent, `["needs_input","error"]` also lets failures through. `null` turns quiet hours off. Set it with `jarvis quiet-hours` |
+| `quietHours` | `{"start":"23:00","end":"08:00","allow":["needs_input"]}` | nightly window. Only kinds in `allow` are spoken: `[]` is completely silent, `["needs_input","error"]` also lets failures through. `null` turns quiet hours off. Set it with `earpiece quiet-hours` |
 | `chimes` | `true` | macOS system sound before each line |
+| `answerFromCard` | `false` | let the floating card approve, deny or reply to Claude Code and Codex. Installs blocking `PermissionRequest` and `Stop` hooks; needs the Mac app and the card on. Set it with `earpiece answers on\|off` or the General switch. See [answer-from-card.md](answer-from-card.md) |
 | `announceAgent` | `false` | prefix lines with the agent name |
 | `agents` | `{}` | per-agent overrides, below |
-| `codexChain` | `null` | written by `jarvis install --chain`; your original Codex notify command. Jarvis runs it after each Codex turn with `JARVIS_FORWARDED=1` set, so a wrapper that calls Jarvis back can't loop. |
+| `codexChain` | `null` | written by `earpiece install --chain`; your original Codex notify command. Earpiece runs it after each Codex turn with `EARPIECE_FORWARDED=1` set, so a wrapper that calls Earpiece back can't loop. |
 
 ## Per-agent overrides
 
@@ -34,14 +35,14 @@ Keys under `agents.<adapter id>`:
 
 | Key | Meaning |
 | --- | --- |
-| `enabled` | `false` keeps tracking the agent in `jarvis agents` but never speaks for it |
+| `enabled` | `false` keeps tracking the agent in `earpiece agents` but never speaks for it |
 | `label` | spoken and displayed name; setting it also turns on the name prefix for that agent |
-| `voice`, `model` | Smallest voice and model (`jarvis voice <id> --agent <agent>` sets both) |
+| `voice`, `model` | Smallest voice and model (`earpiece voice <id> --agent <agent>` sets both) |
 | `openaiVoice` | OpenAI voice for this agent |
 | `sayVoice` | system voice for this agent |
 | `minTurnSeconds` | per-agent threshold |
 
-Adapter ids: `claude-code`, `codex`, `run` (for `jarvis run`), and whatever you pass to `jarvis emit --agent`.
+Adapter ids: `claude-code`, `codex`, `run` (for `earpiece run`), and whatever you pass to `earpiece emit --agent`.
 
 ## Files in the state directory
 
@@ -49,23 +50,23 @@ Adapter ids: `claude-code`, `codex`, `run` (for `jarvis run`), and whatever you 
 | --- | --- |
 | `config.json` | the settings above |
 | `mode.json` | `on`, `quiet` or `off`, and when it ends |
-| `sessions/` | one JSON file per agent session, shown by `jarvis agents` |
+| `sessions/` | one JSON file per agent session, shown by `earpiece agents` |
 | `log.jsonl` | every spoken or skipped line, warnings and errors; secrets are redacted |
 | `last-spoken.json` | the last line, for the 60-second duplicate check |
-| `flushed.json` | when `jarvis stop` last ran; lines queued before then are dropped |
-| `speak.lock/` | held while a line is playing; `jarvis stop` removes it |
+| `flushed.json` | when `earpiece stop` last ran; lines queued before then are dropped |
+| `speak.lock/` | held while a line is playing; `earpiece stop` removes it |
 | `tmp/` | worker jobs, audio files, and `seen-codex-*` markers that make each Codex turn speak once |
 
 Skip reasons you may see in `log.jsonl` include:
 
 - `short_turn`, `duplicate`, `mode_off`, `mode_quiet`, `quiet_hours` and `agent_disabled`
 - `stale`: the line waited more than 2 minutes
-- `flushed`: the line was cleared by `jarvis stop`
+- `flushed`: the line was cleared by `earpiece stop`
 - `busy`: the line never got the speaker
 - `duplicate_turn`: the same Codex turn was delivered twice
-- `forwarded_echo`: a chained notify called Jarvis back
+- `forwarded_echo`: a chained notify called Earpiece back
 - `resolved`: a permission or idle alert you had already answered in the terminal
 
 ## Secrets
 
-Agent messages can contain tokens, keys or connection strings. Jarvis strips anything secret-shaped before a line is spoken, logged, or sent to an LLM for a summary: provider keys (`sk-…`, `ghp_…`, `xoxb-…`, `AKIA…`, `AIza…`), JWTs, private key blocks, passwords in URLs, `NAME=value` pairs where the name contains key, secret, token or password, and any 32+ character string mixing letters and digits. The pattern list is in `src/util.mjs`; open an issue if a format slips through.
+Agent messages can contain tokens, keys or connection strings. Earpiece strips anything secret-shaped before a line is spoken, logged, or sent to an LLM for a summary: provider keys (`sk-…`, `ghp_…`, `xoxb-…`, `AKIA…`, `AIza…`), JWTs, private key blocks, passwords in URLs, `NAME=value` pairs where the name contains key, secret, token or password, and any 32+ character string mixing letters and digits. The pattern list is in `src/util.mjs`; open an issue if a format slips through.

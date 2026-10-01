@@ -177,6 +177,10 @@ input[type="range"] { width: 140px; accent-color: var(--blue); }
 /* agents */
 .agent-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
 .agent-head .mark { width: 34px; height: 34px; border-radius: 8px; background: var(--chip); display: grid; place-items: center; font-weight: 600; font-size: 13px; flex: none; }
+.agent-head .mark .logo { width: 20px; height: 20px; }
+.mini-mark { position: relative; width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 6px; background: var(--chip); }
+.mini-mark .logo { width: 14px; height: 14px; }
+.mini-mark .dot { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; box-shadow: 0 0 0 2px var(--card); }
 .agent-head .label { flex: 1; min-width: 0; }
 .agent-head .label b { font-size: 13.5px; font-weight: 600; }
 .agent-head .label small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.35; margin-top: 1px; }
@@ -212,3 +216,9 @@ input[type="range"] { width: 140px; accent-color: var(--blue); }
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); white-space: pre-wrap; z-index: 10;
 }
 .toast.err { background: rgba(170, 40, 32, 0.95); }
+
+.session-actions { gap: 6px; }
+.session-actions .btn { padding-top: 2px; padding-bottom: 2px; font-size: 12px; }
+.icon-btn { width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; cursor: default; opacity: 0; }
+.session:hover .icon-btn, .icon-btn:focus-visible { opacity: 1; }
+.icon-btn:hover { background: var(--chip); color: var(--fg); }

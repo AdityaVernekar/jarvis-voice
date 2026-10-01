@@ -1,6 +1,6 @@
-// Main window. Talks to the app only through window.jarvis (preload.cjs). Everything is built
+// Main window. Talks to the app only through window.earpiece (preload.cjs). Everything is built
 // with DOM calls, so text from logs or agents is never parsed as HTML.
-const J = window.jarvis;
+const J = window.earpiece;
 const $ = (id) => document.getElementById(id);
 
 function h(tag, attrs, ...kids) {
@@ -132,8 +132,8 @@ function modeSeg() {
 }
 
 function modeSentence() {
-  if (!D.hub.ok) return { dot: "off", text: "Hub not running", sub: D.hub.error || "Jarvis can't hear your agents right now. Quit and reopen the app." };
-  if (D.mode === "off") return { dot: "off", text: "Off", sub: D.until ? `Back on at ${clock(D.until)}` : "Jarvis won't speak until you turn it back on." };
+  if (!D.hub.ok) return { dot: "off", text: "Hub not running", sub: D.hub.error || "Earpiece can't hear your agents right now. Quit and reopen the app." };
+  if (D.mode === "off") return { dot: "off", text: "Off", sub: D.until ? `Back on at ${clock(D.until)}` : "Earpiece won't speak until you turn it back on." };
   if (D.mode === "quiet") return { dot: "quiet", text: "Quiet", sub: `Only speaks when an agent needs you or hits an error${D.until ? `, until ${clock(D.until)}` : ""}.` };
   if (D.quietNow) {
     const allow = Array.isArray(D.quietHours?.allow) ? D.quietHours.allow : ["needs_input"];
@@ -180,7 +180,7 @@ function overview() {
   if (!connected.length)
     parts.push(
       h("h2", {}, "Get started"),
-      h("div", { class: "group" }, row("No agents connected yet", "Connect Claude Code, Codex or Claude Desktop so Jarvis can hear them.", btn("Set up agents", () => go("agents"), "primary"))),
+      h("div", { class: "group" }, row("No agents connected yet", "Connect Claude Code, Codex or Claude Desktop so Earpiece can hear them.", btn("Set up agents", () => go("agents"), "primary"))),
     );
   parts.push(
     h("h2", {}, "Today"),
@@ -195,7 +195,7 @@ function overview() {
   );
   if (s.lastSpoke)
     parts.push(
-      h("h2", {}, "Last thing Jarvis said"),
+      h("h2", {}, "Last thing Earpiece said"),
       h("div", { class: "group" }, row(h("span", { class: "last selectable" }, `“${s.lastSpoke.text}”`), `${ago(s.lastSpoke.at)}${s.lastSpoke.engine ? ` · ${s.lastSpoke.engine}` : ""}`)),
     );
   parts.push(h("h2", {}, "Sessions in the last 24 hours"));
@@ -209,10 +209,11 @@ function overview() {
           h(
             "div",
             { class: "row session" },
-            h("span", { class: `dot ${r.status}` }),
-            h("div", { class: "label" }, h("b", {}, r.project || "Untitled"), h("small", { class: "clip" }, r.lastLine ? `${r.agent} · ${r.lastLine}` : r.agent)),
+            h("span", { class: "mini-mark", title: r.agent }, window.EarpieceLogos.logo(r.agentId), h("span", { class: `dot ${r.status}` })),
+            h("div", { class: "label" }, h("b", {}, r.project || "Untitled"), h("small", { class: "clip" }, [r.agent, r.where, r.lastLine].filter(Boolean).join(" · "))),
             h("span", { class: `pill ${r.status}` }, STATUS[r.status] || r.status),
             h("time", {}, ago(r.updated)),
+            sessionActions(r),
           ),
         ),
       ),
@@ -220,8 +221,29 @@ function overview() {
   return parts;
 }
 
+// "Mark done" for anything still open, plus a quiet "Forget" that drops the row. Both go through
+// the main process, which only touches sessions that exist.
+const OPEN = new Set(["waiting", "working", "error"]);
+function sessionActions(r) {
+  const run = async (action, msg) => {
+    try {
+      await J.session(action, r.agentId, r.session);
+      toast(msg);
+      await reload();
+    } catch (e) {
+      toast(e.message || String(e), true);
+    }
+  };
+  return h(
+    "div",
+    { class: "ctrl session-actions" },
+    OPEN.has(r.status) ? btn("Mark done", () => run("done", `${r.project || "Session"} marked done`)) : null,
+    h("button", { class: "icon-btn", title: "Forget this session", "aria-label": "Forget this session", onclick: () => run("forget", "Session removed") }, "×"),
+  );
+}
+
 function agentStatus(a) {
-  if (a.target === "emit") return ["connected", "Sends with jarvis emit"];
+  if (a.target === "emit") return ["connected", "Sends with earpiece emit"];
   if (a.target === "app") return ["connected", "Connected"];
   if (a.target === "cli") return ["connected", "Connected (command line)"];
   if (!a.present) return ["", "Not installed"];
@@ -229,7 +251,7 @@ function agentStatus(a) {
 }
 
 function agents() {
-  const parts = [h("p", { class: "lede" }, "Jarvis listens to each agent in the way that agent supports. Connecting only edits the file shown, and keeps a backup.")];
+  const parts = [h("p", { class: "lede" }, "Earpiece listens to each agent in the way that agent supports. Connecting only edits the file shown, and keeps a backup.")];
   for (const a of D.agents) {
     const [cls, label] = agentStatus(a);
     const st = a.settings || {};
@@ -270,7 +292,7 @@ function agents() {
         h(
           "div",
           { class: "agent-head" },
-          h("div", { class: "mark", "aria-hidden": "true" }, (a.name || a.id).split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase()),
+          h("div", { class: "mark", "aria-hidden": "true" }, window.EarpieceLogos.logo(a.id)),
           h("div", { class: "label" }, h("b", {}, a.name || a.id), h("small", {}, a.note || "")),
           h("span", { class: `pill ${cls}` }, label),
           ...actions,
@@ -279,7 +301,7 @@ function agents() {
         row("How", a.file ? h("span", { class: "mono selectable" }, a.file) : null, h("span", { class: "muted" }, a.how || "")),
         row("Speak for this agent", "Turn off to mute it without disconnecting.", sw(st.enabled !== false, (v) => setAgent({ enabled: v }), `Speak for ${a.name}`)),
         row(
-          "Name Jarvis says",
+          "Name Earpiece says",
           "Used when announcing the agent. Leave empty for the default.",
           h("input", { type: "text", placeholder: a.name, value: st.label || "", maxlength: 40, style: "width:150px", "aria-label": "Name", onchange: (e) => setAgent({ label: e.target.value }) }),
         ),
@@ -301,7 +323,7 @@ function agents() {
     h(
       "p",
       { class: "note" },
-      "Any other tool can talk to Jarvis with the command line: jarvis emit --agent my-tool --type turn_end --line \"Build finished\". It shows up here once it has sent something.",
+      "Any other tool can talk to Earpiece with the command line: earpiece emit --agent my-tool --type turn_end --line \"Build finished\". It shows up here once it has sent something.",
     ),
   );
   return parts;
@@ -498,7 +520,7 @@ function voice() {
         : null,
     ),
 
-    h("h2", {}, "What Jarvis says"),
+    h("h2", {}, "What Earpiece says"),
     h(
       "div",
       { class: "group" },
@@ -506,7 +528,7 @@ function voice() {
       row(
         "Summaries written by",
         S.summaryProvider === "none"
-          ? "Nothing leaves your Mac for a summary. Jarvis uses a short built-in phrase instead."
+          ? "Nothing leaves your Mac for a summary. Earpiece uses a short built-in phrase instead."
           : "The last reply is sent to this API to write a one-line summary.",
         select(
           [
@@ -580,7 +602,7 @@ function quiet() {
     h(
       "div",
       { class: "group" },
-      row("Every day", qh ? (D.quietNow ? "On now." : `From ${qh.start} to ${qh.end}.`) : "Off. Jarvis speaks at any hour.", sw(Boolean(qh), (v) => (v ? setQ({}) : saveConfig({ quietHours: null })), "Quiet hours")),
+      row("Every day", qh ? (D.quietNow ? "On now." : `From ${qh.start} to ${qh.end}.`) : "Off. Earpiece speaks at any hour.", sw(Boolean(qh), (v) => (v ? setQ({}) : saveConfig({ quietHours: null })), "Quiet hours")),
       qh
         ? [
             row(
@@ -656,7 +678,7 @@ function keys() {
       { class: "group" },
       row(
         env ? h("span", { class: "mono selectable" }, env) : "No file chosen",
-        "If your keys already live in a project's .env, point Jarvis at it instead of pasting them. Environment variables win over this file, and this file wins over keys saved here.",
+        "If your keys already live in a project's .env, point Earpiece at it instead of pasting them. Environment variables win over this file, and this file wins over keys saved here.",
         btn(env ? "Change…" : "Choose…", async () => {
           D.keys = await act("chooseEnvFile");
           await reload();
@@ -748,8 +770,18 @@ function general() {
     h(
       "div",
       { class: "group" },
-      row("Open at login", "Starts in the menu bar so Jarvis is always listening.", sw(P.openAtLogin, (v) => setPref("openAtLogin", v), "Open at login")),
-      row("Show in Dock", "Off keeps Jarvis only in the menu bar. The window is still one click away there.", sw(P.showInDock, (v) => setPref("showInDock", v), "Show in Dock")),
+      row("Open at login", "Starts in the menu bar so Earpiece is always listening.", sw(P.openAtLogin, (v) => setPref("openAtLogin", v), "Open at login")),
+      row("Show in Dock", "Off keeps Earpiece only in the menu bar. The window is still one click away there.", sw(P.showInDock, (v) => setPref("showInDock", v), "Show in Dock")),
+      row(
+        "Show a card when Earpiece speaks",
+        "A small card at the top of the screen with the agent and what it said. It also shows in quiet mode, when nothing is read aloud.",
+        h("div", { class: "ctrl" }, btn("Preview", () => J.previewCard()), sw(P.showCard, (v) => setPref("showCard", v), "Show a card when Earpiece speaks")),
+      ),
+      row(
+        "Answer from the card",
+        "Approve or deny Claude Code and Codex tool requests, and reply when they ask you something, right from the card. Needs the card on. Restart open sessions after changing it; in Codex, trust the new hooks once with /hooks. If you don't answer in about two minutes, the question goes back to the terminal.",
+        sw(P.answerFromCard && P.showCard, (v) => setPref("answerFromCard", v), "Answer from the card"),
+      ),
     ),
     h("h2", {}, "Files"),
     h(
@@ -757,14 +789,14 @@ function general() {
       { class: "group" },
       row("Settings file", h("span", { class: "mono" }, `${D.home}/config.json`), btn("Open", () => act("open", { what: "config" })), btn("Show in Finder", () => act("open", { what: "config", reveal: true }))),
       row("Log", h("span", { class: "mono" }, `${D.home}/log.jsonl`), btn("Open", () => act("open", { what: "log" }))),
-      row("Jarvis folder", h("span", { class: "mono" }, D.home), btn("Show in Finder", () => act("open", { what: "home" }))),
+      row("Earpiece folder", h("span", { class: "mono" }, D.home), btn("Show in Finder", () => act("open", { what: "home" }))),
     ),
     h("h2", {}, "About"),
     h(
       "div",
       { class: "group" },
       row(
-        `Jarvis Voice ${D.version}`,
+        `Earpiece ${D.version}`,
         update ? (update.newer ? `Version ${update.latest} is available.` : update.latest ? "You're up to date." : "No app releases published yet.") : "Open source, MIT licence.",
         update?.newer ? btn("Download", () => act("openUrl", { url: update.url }), "primary") : null,
         btn("Check for updates", async () => {
@@ -772,7 +804,7 @@ function general() {
           render();
         }),
       ),
-      row("Command line", "Everything here also works from a terminal: jarvis status, jarvis quiet 1h, jarvis doctor.", null),
+      row("Command line", "Everything here also works from a terminal: earpiece status, earpiece quiet 1h, earpiece doctor.", null),
     ),
   ];
 }

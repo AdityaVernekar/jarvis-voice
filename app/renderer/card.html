@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
+  <title>Earpiece card</title>
+  <link rel="stylesheet" href="card.css" />
+</head>
+<body>
+  <div class="card" id="card" role="status" aria-live="polite">
+    <div class="avatar" id="avatar"><span class="ring"></span></div>
+    <div class="text">
+      <div class="meta"><b id="who"></b><span id="project"></span><span class="chip" id="chip" hidden></span></div>
+      <p class="line" id="line"></p>
+    </div>
+    <div class="side">
+      <span class="wave" id="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      <button class="btn" id="stop" title="Stop talking" aria-label="Stop talking"><svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1.5" /></svg></button>
+      <button class="btn" id="close" title="Dismiss" aria-label="Dismiss"><svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" /></svg></button>
+    </div>
+    <div class="ask" id="ask" hidden>
+      <pre class="detail" id="detail" hidden></pre>
+      <p class="why" id="why" hidden></p>
+      <p class="why" id="rule" hidden></p>
+      <div class="choices" id="choices">
+        <button class="act allow" id="allow">Allow</button>
+        <button class="act always" id="always" hidden>Always allow</button>
+        <button class="act deny" id="deny">Deny</button>
+        <button class="act terminal" id="terminal" title="Leave it to the terminal prompt">In terminal</button>
+      </div>
+      <div class="reply" id="reply" hidden>
+        <textarea id="replyText" rows="2" maxlength="4000" spellcheck="false"></textarea>
+        <div class="row">
+          <button class="act terminal" id="replyTerminal" title="Leave it to the terminal">In terminal</button>
+          <button class="act allow" id="send">Send</button>
+        </div>
+      </div>
+      <p class="err" id="askErr" hidden></p>
+      <div class="timer" aria-hidden="true"><i id="timerBar"></i></div>
+    </div>
+  </div>
+  <script src="logos.js"></script>
+  <script src="card.js"></script>
+</body>
+</html>

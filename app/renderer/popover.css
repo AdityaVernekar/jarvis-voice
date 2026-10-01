@@ -71,11 +71,13 @@ body {
 .list { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
 .row { display: grid; grid-template-columns: 12px 1fr auto; gap: 2px 8px; padding: 8px 6px; border-radius: 8px; }
 .row + .row { border-top: 1px solid var(--line); }
-.row .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; background: var(--muted); }
-.row.waiting .dot { background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 25%, transparent); }
-.row.working .dot { background: var(--blue); animation: pulse 1.6s ease-in-out infinite; }
-.row.done .dot { background: var(--green); }
-.row.error .dot { background: var(--red); }
+.row .dot { position: relative; width: 12px; height: 12px; margin-top: 3px; }
+.row .dot .logo { width: 12px; height: 12px; display: block; }
+.row .dot::after { content: ""; position: absolute; right: -3px; bottom: -3px; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 1.5px var(--bg); }
+.row.waiting .dot::after { background: var(--amber); }
+.row.working .dot::after { background: var(--blue); animation: pulse 1.6s ease-in-out infinite; }
+.row.done .dot::after { background: var(--green); }
+.row.error .dot::after { background: var(--red); }
 @keyframes pulse { 50% { opacity: 0.35; } }
 .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .name small { font-weight: 400; color: var(--muted); margin-left: 6px; }
@@ -96,3 +98,8 @@ button { font: inherit; color: var(--fg); }
 .primary { border: 0; background: var(--fg); color: Canvas; padding: 6px 12px; border-radius: 7px; font-weight: 500; font-size: 12px; }
 .primary:disabled { opacity: 0.5; }
 button:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+.row .age { display: flex; align-items: center; gap: 4px; }
+.done-btn { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 12px; line-height: 18px; opacity: 0; }
+.row:hover .done-btn, .done-btn:focus-visible { opacity: 1; }
+.done-btn:hover { background: var(--line); color: var(--green); }

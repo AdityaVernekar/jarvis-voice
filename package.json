@@ -1,9 +1,10 @@
 {
-  "name": "jarvis-voice",
-  "version": "0.2.2",
+  "name": "earpiece",
+  "version": "0.3.0",
   "description": "A voice hub for terminal coding agents. Claude Code, Codex CLI and any other agent tell you out loud when they finish or need you.",
   "type": "module",
   "bin": {
+    "earpiece": "./bin/earpiece.mjs",
     "jarvis": "./bin/jarvis.mjs"
   },
   "files": [
@@ -20,8 +21,8 @@
   "scripts": {
     "test": "node --test",
     "check": "node -e \"for (const f of require('fs').readdirSync('.',{recursive:true})) if (/\\.mjs$/.test(f) && !f.includes('node_modules')) require('child_process').execFileSync(process.execPath,['--check',f],{stdio:'inherit'})\"",
-    "install-hooks": "node bin/jarvis.mjs install",
-    "uninstall-hooks": "node bin/jarvis.mjs uninstall"
+    "install-hooks": "node bin/earpiece.mjs install",
+    "uninstall-hooks": "node bin/earpiece.mjs uninstall"
   },
   "engines": {
     "node": ">=20"
@@ -40,12 +41,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AdityaVernekar/jarvis-voice.git"
+    "url": "git+https://github.com/adissocrazy/earpiece.git"
   },
   "bugs": {
-    "url": "https://github.com/AdityaVernekar/jarvis-voice/issues"
+    "url": "https://github.com/adissocrazy/earpiece/issues"
   },
-  "homepage": "https://github.com/AdityaVernekar/jarvis-voice#readme",
+  "homepage": "https://earpiece.dev",
   "author": "Aditya Vernekar",
   "license": "MIT"
 }

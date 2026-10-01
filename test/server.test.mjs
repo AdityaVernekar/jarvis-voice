@@ -11,7 +11,7 @@ const home = tempHome();
 const { startHubServer } = await import("../src/hub/server.mjs");
 const { getSession } = await import("../src/hub/sessions.mjs");
 const { writeShim } = await import("../src/shim.mjs");
-const { isJarvisCommand } = await import("../src/adapters/install-util.mjs");
+const { isOurCommand } = await import("../src/adapters/install-util.mjs");
 const { BIN, P } = await import("../src/paths.mjs");
 
 const spoken = () => readLog(home).filter((e) => e.spoke).map((e) => e.spoke);
@@ -60,10 +60,10 @@ test("only one hub per socket; a stale socket file is replaced", async () => {
   await b.close();
 });
 
-test("the shim is recognised as a Jarvis hook, so installs replace instead of doubling", () => {
-  assert.ok(isJarvisCommand(`"${home}/bin/jarvis-hook" hook claude-code`));
-  assert.ok(isJarvisCommand(`notify = ["${home}/bin/jarvis-hook", "codex"]`));
-  assert.ok(!isJarvisCommand(`"/usr/local/bin/jarvis-hookup" deploy`));
+test("the shim is recognised as an Earpiece hook, so installs replace instead of doubling", () => {
+  assert.ok(isOurCommand(`"${home}/bin/earpiece-hook" hook claude-code`));
+  assert.ok(isOurCommand(`notify = ["${home}/bin/earpiece-hook", "codex"]`));
+  assert.ok(!isOurCommand(`"/usr/local/bin/earpiece-hookup" deploy`));
 });
 
 test("shim sends to the hub when it is running", { skip: !hasCurl && "no curl" }, async () => {
@@ -85,7 +85,7 @@ test("shim sends to the hub when it is running", { skip: !hasCurl && "no curl" }
 });
 
 test("shim falls back to the core when no hub is running, and always exits 0", () => {
-  const env = { ...process.env, JARVIS_HOME: home, JARVIS_FOREGROUND: "1" };
+  const env = { ...process.env, EARPIECE_HOME: home, EARPIECE_FOREGROUND: "1" };
   const shim = writeShim({ fallback: [process.execPath, BIN] });
   const r = spawnSync(shim, ["hook", "claude-code"], {
     env,
@@ -94,7 +94,7 @@ test("shim falls back to the core when no hub is running, and always exits 0", (
   });
   assert.equal(r.status, 0);
   assert.equal(spoken().at(-1), "admin needs your permission to use Write.");
-  const forwarded = spawnSync(shim, ["codex", "{}"], { env: { ...env, JARVIS_FORWARDED: "1" } });
+  const forwarded = spawnSync(shim, ["codex", "{}"], { env: { ...env, EARPIECE_FORWARDED: "1" } });
   assert.equal(forwarded.status, 0);
   const broken = writeShim({ fallback: ["/nonexistent/node", BIN] }, path.join(home, "bin", "broken-hook"));
   assert.equal(spawnSync(broken, ["hook"], { input: "{}" }).status, 0);

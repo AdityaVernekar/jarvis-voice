@@ -5,10 +5,12 @@
 
 # local artifacts
 node_modules/
+dist/
+app/dist/
 *.mp3
 *.wav
 samples/
-*.bak-jarvis-*
+*.bak-earpiece-*
 .DS_Store
 coverage/
 *.log

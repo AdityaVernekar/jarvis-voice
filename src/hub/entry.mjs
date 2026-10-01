@@ -1,4 +1,4 @@
-// Entry points shared by the CLI (`jarvis hook`, `jarvis codex`) and the hub server, so a hook
+// Entry points shared by the CLI (`earpiece hook`, `earpiece codex`) and the hub server, so a hook
 // behaves the same whether it runs as its own process or is sent to the desktop app.
 import { getAdapter } from "../adapters/index.mjs";
 import { log } from "../util.mjs";

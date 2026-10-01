@@ -1,58 +1,74 @@
 # Mac app
 
-Jarvis Voice for Mac is a regular Mac app with a window, a Dock icon and a menu bar icon. It runs the hub, connects your agents with one click, and lets you change everything without a terminal.
+Earpiece for Mac is a regular Mac app with a window, a Dock icon and a menu bar icon. It runs the hub, connects your agents with one click, and lets you change everything without a terminal.
 
 The window has seven sections:
 
-- **Overview**: whether Jarvis is listening, On / Quiet / Off, today's counts, the last thing it said, and every agent session from the last 24 hours (amber needs you, blue working, green done, red error).
+- **Overview**: whether Earpiece is listening, On / Quiet / Off, today's counts, the last thing it said, and every agent session from the last 24 hours (amber needs you, blue working, green done, red error).
 - **Agents**: Claude Code, Codex and Claude Desktop, each with Connect / Disconnect, the file it edits, and per-agent mute, name, voice and minimum turn length.
 - **Voice**: provider order, the Smallest.ai voice browser with search, filters and a play button, model, speed, OpenAI and macOS voices, language, and who writes summaries (including "No summaries" if nothing should leave your Mac).
 - **Quiet**: quiet or off for a while, and daily quiet hours with what may still speak.
-- **API Keys**: paste, test or remove keys, or point Jarvis at an existing `.env`. Saved keys are never shown again.
+- **API Keys**: paste, test or remove keys, or point Earpiece at an existing `.env`. Saved keys are never shown again.
 - **Activity**: a readable log with repeats folded together and filters for spoken, kept quiet and problems.
 - **General**: open at login, show in Dock, the settings and log files, and update checks.
 
-The menu bar icon stays for quick access: the popover shows sessions, the mode switch, Stop, Test and **Open app**, and the count of sessions waiting on you sits next to the icon. Closing the window keeps Jarvis running; quit from the app menu (⌘Q) or the menu bar. Turn off **Show in Dock** in General to keep it only in the menu bar. When it starts at login it stays in the menu bar until you open it.
+The menu bar icon stays for quick access: the popover shows sessions, the mode switch, Stop, Test and **Open app**, and the count of sessions waiting on you sits next to the icon. Closing the window keeps Earpiece running; quit from the app menu (⌘Q) or the menu bar. Turn off **Show in Dock** in General to keep it only in the menu bar. When it starts at login it stays in the menu bar until you open it.
 
-The app and the CLI share `~/.jarvis-voice`: config, voices, mode, quiet hours and the session list. Anything you set with `jarvis …` shows up in the app, and the reverse.
+The app and the CLI share `~/.earpiece`: config, voices, mode, quiet hours and the session list. Anything you set with `earpiece …` shows up in the app, and the reverse.
 
 ## Install
 
-Download `Jarvis Voice-<version>-universal.dmg` from the [releases page](https://github.com/AdityaVernekar/jarvis-voice/releases) and drag the app to Applications.
+Download `Earpiece-<version>-universal.dmg` from the [releases page](https://github.com/adissocrazy/earpiece/releases) and drag the app to Applications.
 
 The build is ad-hoc signed, not notarized, so macOS blocks it the first time you open it:
 
-1. Open Jarvis Voice. macOS says it can't verify the developer. Click **Done**.
-2. Open **System Settings → Privacy & Security**, scroll to Security, and click **Open Anyway** next to "Jarvis Voice was blocked".
+1. Open Earpiece. macOS says it can't verify the developer. Click **Done**.
+2. Open **System Settings → Privacy & Security**, scroll to Security, and click **Open Anyway** next to "Earpiece was blocked".
 3. Open the app again and confirm.
 
-On macOS 14 and earlier, right-click the app and choose **Open** instead. If you'd rather clear the flag from a terminal: `xattr -dr com.apple.quarantine "/Applications/Jarvis Voice.app"`.
+On macOS 14 and earlier, right-click the app and choose **Open** instead. If you'd rather clear the flag from a terminal: `xattr -dr com.apple.quarantine "/Applications/Earpiece.app"`.
 
 ## Connect your agents
 
 Open **Agents** and click **Connect** next to each agent (the popover's **Connect your agents** does all of them at once). Every connection edits one file and keeps a backup next to it.
 
-- **Claude Code** and **Codex** get hooks that point at `~/.jarvis-voice/bin/jarvis-hook`. If a Codex `notify` command is already configured, it is kept and Jarvis forwards every event to it. Restart open sessions afterwards.
-- **Claude Desktop** has no hooks, so Jarvis adds a small MCP server named `jarvis-voice` to `claude_desktop_config.json`. It gives Claude one tool, `jarvis_notify`. Claude calls it at the end of a reply that did real work, or when it stops to ask you something, and writes the spoken line itself, so the chat isn't sent anywhere for a summary. Quit and reopen Claude Desktop after connecting. Each call shows up in the chat as a tool call; you can set it to always allow. It works in chats and Cowork. Whether the Code tab also runs your `~/.claude` hooks depends on the Claude Desktop version; the Activity page shows it if it does.
+- **Claude Code** and **Codex** get hooks that point at `~/.earpiece/bin/earpiece-hook`. If a Codex `notify` command is already configured, it is kept and Earpiece forwards every event to it. Restart open sessions afterwards.
+- **Claude Desktop** has no hooks, so Earpiece adds a small MCP server named `earpiece` to `claude_desktop_config.json`. It gives Claude one tool, `earpiece_notify`. Claude calls it at the end of a reply that did real work, or when it stops to ask you something, and writes the spoken line itself, so the chat isn't sent anywhere for a summary. Quit and reopen Claude Desktop after connecting. Each call shows up in the chat as a tool call; you can set it to always allow. It works in chats and Cowork. Whether the Code tab also runs your `~/.claude` hooks depends on the Claude Desktop version; the Activity page shows it if it does.
 
-If you set up hooks earlier with `jarvis install`, connecting from the app replaces them, so you won't hear every line twice. Running `jarvis install` later keeps hooks on the app. To point them back at a CLI checkout, run `jarvis install --node`.
+If you set up hooks earlier with `earpiece install`, connecting from the app replaces them, so you won't hear every line twice. Running `earpiece install` later keeps hooks on the app. To point them back at a CLI checkout, run `earpiece install --node`.
+
+Each session row also says where the agent is running, for example "Claude Code · iTerm2 · ttys004 · tmux main:2.0". See [terminal-origin.md](terminal-origin.md).
+
+## Marking sessions done
+
+If you've answered an agent somewhere Earpiece can't see, or you just want a session out of the way, click **Mark done** on its row in Overview. In the menu bar list, hover the row and click ✓. Earpiece won't speak a "needs you" line for that session if one is still queued, and the menu bar count goes down. Hover a row in Overview and click × to forget the session. It comes back the next time that agent sends something.
+
+## The floating card
+
+Each time Earpiece speaks, a small dark card slides down just under the menu bar. It shows the agent's logo, its name, the project and the line, with a pulsing ring while the line plays. It never takes focus, it follows you across Spaces and full-screen apps, and clicks go through everything except the card. Hover over it to keep it open, and to get Stop and Dismiss buttons. Click it to open the app.
+
+It also shows when Earpiece stays silent because of quiet mode, quiet hours or a muted agent, with a small "Quiet" or "Muted" tag. When Earpiece is Off, nothing shows. You can turn the card off, or preview it, under General.
+
+With **Answer from the card** on (General), the card can also carry a question: Allow / Deny for a tool request, or a reply box when the agent ended on a question. It still never takes the keyboard until you click into the reply box, and the buttons stay disabled for the first moment so a stray click can't approve anything. See [answer-from-card.md](answer-from-card.md).
+
+The core writes the last line to `~/.earpiece/card.json`, which the app watches. That way lines spoken by a background worker (when the app wasn't the hub) show up as well.
 
 ## API keys
 
-An app started from Finder or at login doesn't see variables exported in `~/.zshrc`. Paste keys in **API Keys**, which saves them to `~/.jarvis-voice/.env` (readable only by you), or write that file yourself:
+An app started from Finder or at login doesn't see variables exported in `~/.zshrc`. Paste keys in **API Keys**, which saves them to `~/.earpiece/.env` (readable only by you), or write that file yourself:
 
 ```bash
 SMALLEST_API_KEY=...
 OPENAI_API_KEY=...
 ```
 
-To keep them somewhere else, click **Choose…** under "Use an existing .env file", or run `jarvis env /path/to/.env`. Environment variables win over that file, and that file wins over keys saved in the app; the page warns you when a saved key is not the one being used. It only records the path and lists which keys it found; your hooks are not touched. With no keys, Jarvis uses the macOS voice and the first sentence of each message.
+To keep them somewhere else, click **Choose…** under "Use an existing .env file", or run `earpiece env /path/to/.env`. Environment variables win over that file, and that file wins over keys saved in the app; the page warns you when a saved key is not the one being used. It only records the path and lists which keys it found; your hooks are not touched. With no keys, Earpiece uses the macOS voice and the first sentence of each message.
 
 ## How it works
 
-The app listens on a Unix socket, `~/.jarvis-voice/hub.sock` (readable only by you). Each hook runs the `jarvis-hook` shell script, which posts the event to the socket with `curl` and returns in a few milliseconds. The app summarises and speaks it. When the app isn't running, the script runs the bundled Jarvis core with the app's own runtime (`ELECTRON_RUN_AS_NODE=1`), so pings keep working. A hook never fails your agent: the script always exits 0.
+The app listens on a Unix socket, `~/.earpiece/hub.sock` (readable only by you). Each hook runs the `earpiece-hook` shell script, which posts the event to the socket with `curl` and returns in a few milliseconds. The app summarises and speaks it. When the app isn't running, the script runs the bundled Earpiece core with the app's own runtime (`ELECTRON_RUN_AS_NODE=1`), so pings keep working. A hook never fails your agent: the script always exits 0.
 
-`jarvis serve` runs the same hub from a terminal, and `jarvis install --hub` points hooks at the same script. That's useful on a machine without the app. Only one hub runs at a time. If `jarvis serve` is already running, the app shows a warning and hooks keep going through the running hub.
+`earpiece serve` runs the same hub from a terminal, and `earpiece install --hub` points hooks at the same script. That's useful on a machine without the app. Only one hub runs at a time. If `earpiece serve` is already running, the app shows a warning and hooks keep going through the running hub.
 
 `npm run bench` in `app/` compares hook latency through the socket with a cold Node start.
 

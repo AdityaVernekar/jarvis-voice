@@ -5,7 +5,7 @@ import { tempHome } from "./helpers.mjs";
 tempHome({ quietHours: null, chimes: false, ttsProviders: ["smallest", "openai"] });
 process.env.SMALLEST_API_KEY = "test-smallest";
 process.env.OPENAI_API_KEY = "test-openai";
-delete process.env.JARVIS_DRY_RUN; // exercise the engine chain with stubbed fetch and playback
+delete process.env.EARPIECE_DRY_RUN; // exercise the engine chain with stubbed fetch and playback
 const { speak } = await import("../src/voice/speak.mjs");
 const { findVoice } = await import("../src/voice/engines/smallest.mjs");
 const { config } = await import("../src/config.mjs");
@@ -36,7 +36,7 @@ test("a Smallest 400 falls through to OpenAI and the key never reaches the log",
   assert.match(r.failures[0], /smallest HTTP 400/);
   assert.deepEqual(played, [".mp3"]);
   const fs = await import("node:fs");
-  const log = fs.readFileSync(`${process.env.JARVIS_HOME}/log.jsonl`, "utf8");
+  const log = fs.readFileSync(`${process.env.EARPIECE_HOME}/log.jsonl`, "utf8");
   assert.ok(!log.includes("test-smallest") && !log.includes("test-openai"));
 });
 

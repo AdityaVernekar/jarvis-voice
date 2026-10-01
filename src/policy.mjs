@@ -1,4 +1,4 @@
-// When Jarvis is allowed to talk: modes (on / quiet / off) and quiet hours.
+// When Earpiece is allowed to talk: modes (on / quiet / off) and quiet hours.
 import { P } from "./paths.mjs";
 import { now, readJson, writeJson } from "./util.mjs";
 

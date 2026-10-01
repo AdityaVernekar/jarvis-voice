@@ -7,7 +7,7 @@ import test from "node:test";
 import { friendlyLog, writeKey } from "../app/main/dashboard.mjs";
 
 test("writeKey replaces one line, keeps the rest, and stays private", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-keys-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "earpiece-keys-"));
   const f = path.join(dir, ".env");
   fs.writeFileSync(f, "# mine\nOTHER=1\nexport OPENAI_API_KEY='old'\n");
   writeKey(f, "OPENAI_API_KEY", "sk-new-123456");

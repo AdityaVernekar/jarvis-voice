@@ -5,8 +5,8 @@ import { HOME, P } from "./paths.mjs";
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export const now = () => Date.now();
-export const isDry = () => process.env.JARVIS_DRY_RUN === "1";
-export const isEcho = () => process.env.JARVIS_ECHO === "1" || isDry();
+export const isDry = () => process.env.EARPIECE_DRY_RUN === "1";
+export const isEcho = () => process.env.EARPIECE_ECHO === "1" || isDry();
 
 // State holds agent messages, so it is private to the user (0700 dirs, 0600 files).
 export function ensureDirs() {

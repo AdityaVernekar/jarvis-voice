@@ -1,5 +1,5 @@
-// Session registry: one small JSON file per (agent, session) under ~/.jarvis-voice/sessions/.
-// It is what lets `jarvis agents` show every running agent, whichever tool it lives in.
+// Session registry: one small JSON file per (agent, session) under ~/.earpiece/sessions/.
+// It is what lets `earpiece agents` show every running agent, whichever tool it lives in.
 import fs from "node:fs";
 import path from "node:path";
 import { P } from "../paths.mjs";
@@ -15,14 +15,29 @@ export function getSession(agent, session) {
 }
 
 // `patch` may be a function of the current record, so the check and the write use the same read.
-export function updateSession(agent, session, patch) {
+// `touch: false` leaves `updated` alone, for bookkeeping (like where the agent runs) that isn't activity.
+export function updateSession(agent, session, patch, { touch = true } = {}) {
   ensureDirs();
   const f = fileFor(agent, session);
   const cur = readJson(f, null) || { agent, session: String(session), created: now() };
   const p = typeof patch === "function" ? patch(cur) : patch;
-  const next = { ...cur, ...p, agent, session: String(session), updated: now() };
+  const next = { ...cur, ...p, agent, session: String(session), updated: touch || !cur.updated ? now() : cur.updated };
   writeJson(f, next);
   return next;
+}
+
+// What you can set from the app or CLI. "done" also counts as answering anything the agent was
+// waiting on, so a queued "needs you" line for it is dropped instead of spoken late.
+export const USER_STATUS = ["done", "idle"];
+export function setSessionStatus(agent, session, status) {
+  if (!USER_STATUS.includes(status)) throw new Error(`status must be ${USER_STATUS.join(" or ")}`);
+  if (!getSession(agent, session)) throw new Error("no such session");
+  return updateSession(agent, session, { status, activeAt: now(), activeTool: null, markedByUser: now() });
+}
+
+/** Forget a session; it comes back if the agent sends anything new. */
+export function forgetSession(agent, session) {
+  fs.rmSync(fileFor(agent, session), { force: true });
 }
 
 /** All sessions, most recently active first. `sinceMs` limits to recent activity. */

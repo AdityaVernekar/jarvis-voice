@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { getAdapter } from "../adapters/index.mjs";
+import { showCard } from "../card.mjs";
 import { agentConfig, config } from "../config.mjs";
 import { phrase } from "../i18n.mjs";
 import { BIN, P } from "../paths.mjs";
@@ -30,9 +31,9 @@ export async function ingest(agentId, payload, { deps = {}, foreground } = {}) {
 
 /**
  * Handle one already-normalized hub event. turn_start is recorded inline (it must be quick);
- * everything else goes to a background worker unless `foreground` or JARVIS_FOREGROUND=1.
+ * everything else goes to a background worker unless `foreground` or EARPIECE_FOREGROUND=1.
  */
-export async function ingestEvent(ev, { foreground = process.env.JARVIS_FOREGROUND === "1", deps = {} } = {}) {
+export async function ingestEvent(ev, { foreground = process.env.EARPIECE_FOREGROUND === "1", deps = {} } = {}) {
   if (ev.type === "turn_start") {
     updateSession(ev.agent, ev.session, {
       status: "working",
@@ -70,7 +71,7 @@ function detach(ev) {
     .unref();
 }
 
-/** Background worker: `jarvis _worker <jobfile>`. */
+/** Background worker: `earpiece _worker <jobfile>`. */
 export async function runWorker(file) {
   const ev = readJson(file, null);
   fs.rmSync(file, { force: true });
@@ -193,6 +194,7 @@ export async function processEvent(input, deps = {}) {
 
   if (!line) return { skipped: "nothing_to_say" };
   if (!cfg.enabled) {
+    showCard({ line, kind: say.kind, agent: ev.agent, project, session: ev.session, state: "silent", reason: "agent_disabled" });
     log({ skipped: "agent_disabled", line, ...meta });
     return { skipped: "agent_disabled" };
   }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
-  <title>Jarvis Voice</title>
+  <title>Earpiece</title>
   <link rel="stylesheet" href="popover.css" />
 </head>
 <body>
@@ -11,7 +11,7 @@
     <header class="top">
       <div class="brand">
         <span class="wave" id="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-        <span class="title">Jarvis</span>
+        <span class="title">Earpiece</span>
       </div>
       <div class="seg" role="radiogroup" aria-label="Mode">
         <button data-mode="on" role="radio">On</button>
@@ -23,7 +23,7 @@
     <p class="status" id="status"></p>
 
     <section class="connect" id="connect" hidden>
-      <p><strong>Connect your agents</strong><br />Jarvis adds hooks to Claude Code and Codex so they can tell you when they finish or need you. Anything already in your Codex <code>notify</code> keeps working.</p>
+      <p><strong>Connect your agents</strong><br />Earpiece adds hooks to Claude Code and Codex so they can tell you when they finish or need you. Anything already in your Codex <code>notify</code> keeps working.</p>
       <button class="primary" id="connectBtn">Connect your agents</button>
       <pre class="result" id="connectResult" hidden></pre>
     </section>
@@ -38,6 +38,7 @@
       <button class="icon" id="moreBtn" title="More" aria-label="More">•••</button>
     </footer>
   </main>
+  <script src="logos.js"></script>
   <script src="popover.js"></script>
 </body>
 </html>

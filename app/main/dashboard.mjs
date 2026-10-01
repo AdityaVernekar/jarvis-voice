@@ -11,7 +11,7 @@ const HHMM = /^([01]?\d|2[0-3]):[0-5]\d$/;
 const AGENT_ID = /^[A-Za-z0-9_.-]{1,64}$/;
 const VOICE_ID = /^[A-Za-z0-9_.-]{1,64}$/;
 export const OPENAI_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse"];
-const REPO = "AdityaVernekar/jarvis-voice";
+const REPO = "adissocrazy/earpiece";
 
 export const tidyPath = (p) => (p ? String(p).split(os.homedir()).join("~") : p);
 const bad = (msg) => Object.assign(new Error(msg), { user: true });
@@ -74,7 +74,7 @@ function tailLines(file, bytes = 384 * 1024) {
 const SKIP_LABEL = {
   duplicate: "said the same thing under a minute ago",
   forwarded_echo: "echo from a chained Codex notify",
-  mode_off: "Jarvis was off",
+  mode_off: "Earpiece was off",
   mode_quiet: "Quiet mode",
   quiet_hours: "quiet hours",
   flushed: "cleared by Stop",
@@ -82,6 +82,7 @@ const SKIP_LABEL = {
   resolved: "you already answered it",
   busy: "speaker was busy",
   stopped: "stopped",
+  voice_failed: "no voice answered in time",
   short_turn: "turn was shorter than the minimum",
   agent_disabled: "agent is muted",
   already_spoke: "already announced",
@@ -169,7 +170,7 @@ export function createDashboard({ app, dialog, shell, lib, core, state, hookStat
     codex: { how: "notify in ~/.codex/config.toml", note: "Codex CLI. An existing notify command keeps working." },
     "claude-desktop": {
       how: "MCP server in claude_desktop_config.json",
-      note: "Chats and Cowork. Claude calls a jarvis_notify tool when it finishes real work or needs you, and writes the line itself. Quit and reopen Claude Desktop after connecting.",
+      note: "Chats and Cowork. Claude calls an earpiece_notify tool when it finishes real work or needs you, and writes the line itself. Quit and reopen Claude Desktop after connecting.",
     },
   };
 
@@ -182,11 +183,11 @@ export function createDashboard({ app, dialog, shell, lib, core, state, hookStat
       file: tidyPath(lib.getAdapter(h.id).configFile?.()),
       settings: cfg.agents[h.id] || {},
     }));
-    // Agents that talk through `jarvis emit` show up once they've sent something.
+    // Agents that talk through `earpiece emit` show up once they've sent something.
     const seen = new Set(known.map((a) => a.id));
     const others = [...new Set(lib.listSessions({}).map((s) => s.agent))]
       .filter((id) => !seen.has(id))
-      .map((id) => ({ id, name: lib.getAdapter(id).name, target: "emit", present: true, how: "jarvis emit", settings: cfg.agents[id] || {} }));
+      .map((id) => ({ id, name: lib.getAdapter(id).name, target: "emit", present: true, how: "earpiece emit", settings: cfg.agents[id] || {} }));
     return [...known, ...others];
   }
 
@@ -216,7 +217,7 @@ export function createDashboard({ app, dialog, shell, lib, core, state, hookStat
       agents: agents(),
       keys: keyStatus(),
       stats: stats(),
-      prefs: { showInDock: prefs.get().showInDock !== false, openAtLogin: app.getLoginItemSettings().openAtLogin },
+      prefs: { showInDock: prefs.get().showInDock !== false, showCard: prefs.get().showCard !== false, answerFromCard: lib.config().answerFromCard === true, openAtLogin: app.getLoginItemSettings().openAtLogin },
       engines: listEngines().map((e) => ({ id: e.id, label: e.label || e.id, keyName: e.keyName || null })),
       languages: [["en", "English"], ["hinglish", "Hinglish"], ...Object.entries(LANG_NAMES)],
       openaiVoices: OPENAI_VOICES,

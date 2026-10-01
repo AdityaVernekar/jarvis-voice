@@ -3,12 +3,16 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ASK_HOOK_TIMEOUT_SEC } from "../hub/asks.mjs";
 import { sleep } from "../util.mjs";
-import { backup, commandPrefix, isJarvisCommand, quote } from "./install-util.mjs";
+import { permissionAsk, permissionOutput, replyAsk, replyOutput } from "./ask-util.mjs";
+import { backup, commandPrefix, isOurCommand, quote } from "./install-util.mjs";
 
-// PostToolUse tells Jarvis the agent is moving again, so a permission alert you already
+// PostToolUse tells Earpiece the agent is moving again, so a permission alert you already
 // answered in the terminal isn't read out after the fact.
 const HOOK_EVENTS = ["UserPromptSubmit", "Stop", "Notification", "PostToolUse"];
+// With "answer from the card" on, these two also get a blocking hook that waits for the card.
+const ASK_EVENTS = ["PermissionRequest", "Stop"];
 const settingsFile = () => path.join(os.homedir(), ".claude", "settings.json");
 
 // Read the tail of the transcript and return the last assistant text block.
@@ -70,6 +74,18 @@ export default {
     }
   },
 
+  // Blocking hooks (`earpiece ask claude-code`): a question the card can answer, or null.
+  toAsk(p) {
+    if (p.hook_event_name === "PermissionRequest") return permissionAsk("claude-code", p);
+    if (p.hook_event_name === "Stop") return replyAsk("claude-code", p);
+    return null;
+  },
+
+  // What the hook prints for the answer. null = print nothing, the terminal prompt carries on.
+  askOutput(p, ask, answer) {
+    return ask.kind === "permission" ? permissionOutput(p, answer) : replyOutput(answer);
+  },
+
   // Runs in the background worker, never in the hook process.
   async enrich(ev) {
     if (ev.type !== "turn_end" || ev.text || !ev.transcriptPath) return ev;
@@ -85,13 +101,13 @@ export default {
 
   isInstalled() {
     try {
-      return isJarvisCommand(fs.readFileSync(settingsFile(), "utf8").replace(/\\"/g, '"'));
+      return isOurCommand(fs.readFileSync(settingsFile(), "utf8").replace(/\\"/g, '"'));
     } catch {
       return false;
     }
   },
 
-  install({ node, bin, cmd, uninstall = false }) {
+  install({ node, bin, cmd, uninstall = false, ask = false }) {
     const file = settingsFile();
     if (uninstall && !fs.existsSync(file)) return [];
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -104,18 +120,24 @@ export default {
       }
     }
     const b = backup(file);
-    const command = `${commandPrefix({ cmd, node, bin }).map(quote).join(" ")} hook claude-code`;
+    const prefix = commandPrefix({ cmd, node, bin }).map(quote).join(" ");
+    const command = `${prefix} hook claude-code`;
+    const askCommand = `${prefix} ask claude-code`;
     settings.hooks ||= {};
-    for (const ev of HOOK_EVENTS) {
+    for (const ev of new Set([...HOOK_EVENTS, ...ASK_EVENTS])) {
       const groups = (settings.hooks[ev] || [])
-        .map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !isJarvisCommand(h.command)) }))
+        .map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !isOurCommand(h.command)) }))
         .filter((g) => g.hooks.length);
-      if (!uninstall) groups.push({ hooks: [{ type: "command", command, timeout: 10 }] });
+      if (!uninstall) {
+        if (HOOK_EVENTS.includes(ev)) groups.push({ hooks: [{ type: "command", command, timeout: 10 }] });
+        // Waits for an answer from the card, so it needs far longer than the 10 s above.
+        if (ask && ASK_EVENTS.includes(ev)) groups.push({ hooks: [{ type: "command", command: askCommand, timeout: ASK_HOOK_TIMEOUT_SEC }] });
+      }
       if (groups.length) settings.hooks[ev] = groups;
       else delete settings.hooks[ev];
     }
     if (!Object.keys(settings.hooks).length) delete settings.hooks;
-    const tmp = `${file}.jarvis-${process.pid}.tmp`; // atomic: a running Claude Code never reads half a file
+    const tmp = `${file}.earpiece-${process.pid}.tmp`; // atomic: a running Claude Code never reads half a file
     fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n");
     fs.renameSync(tmp, file);
     return [`✓ Claude Code hooks ${uninstall ? "removed from" : "added to"} ${file}${b ? `  (backup: ${path.basename(b)})` : ""}`];

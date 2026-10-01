@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // How long does one hook call cost the agent? Compares the curl shim talking to a running hub
-// with the fallback that starts the core itself. Uses a throwaway JARVIS_HOME and dry-run audio.
-//   node scripts/bench-hook.mjs [--runs 40] [--electron "/Applications/Jarvis Voice.app/Contents/MacOS/Jarvis Voice"]
+// with the fallback that starts the core itself. Uses a throwaway EARPIECE_HOME and dry-run audio.
+//   node scripts/bench-hook.mjs [--runs 40] [--electron "/Applications/Earpiece.app/Contents/MacOS/Earpiece"]
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -12,15 +12,15 @@ const opt = (k, d) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
 const runs = Number(opt("--runs", 40));
 const electron = opt("--electron", null);
 
-const home = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-bench-"));
-process.env.JARVIS_HOME = home;
-process.env.JARVIS_DRY_RUN = "1";
+const home = fs.mkdtempSync(path.join(os.tmpdir(), "earpiece-bench-"));
+process.env.EARPIECE_HOME = home;
+process.env.EARPIECE_DRY_RUN = "1";
 fs.writeFileSync(path.join(home, "config.json"), JSON.stringify({ quietHours: null, chimes: false }));
 const { BIN } = await import("../src/paths.mjs");
 const { writeShim } = await import("../src/shim.mjs");
 
 const payload = JSON.stringify({ hook_event_name: "PostToolUse", session_id: "bench", cwd: "/x/bench", tool_name: "Bash" });
-const env = { ...process.env, JARVIS_HOME: home, JARVIS_DRY_RUN: "1" };
+const env = { ...process.env, EARPIECE_HOME: home, EARPIECE_DRY_RUN: "1" };
 
 function time(shim) {
   const ms = [];

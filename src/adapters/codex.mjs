@@ -6,12 +6,46 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { config, updateConfig } from "../config.mjs";
+import { ASK_HOOK_TIMEOUT_SEC } from "../hub/asks.mjs";
 import { log, now, readJson } from "../util.mjs";
 import { P } from "../paths.mjs";
-import { backup, commandPrefix, isJarvisCommand, quote } from "./install-util.mjs";
+import { permissionAsk, permissionOutput, replyAsk, replyOutput } from "./ask-util.mjs";
+import { backup, commandPrefix, isOurCommand, quote } from "./install-util.mjs";
 
 const tomlFile = () => path.join(os.homedir(), ".codex", "config.toml");
-const MARKER = "# Jarvis voice pings";
+// Codex reads lifecycle hooks from here. The notify line above stays in config.toml.
+const hooksFile = () => path.join(os.homedir(), ".codex", "hooks.json");
+const ASK_EVENTS = ["PermissionRequest", "Stop"];
+
+/**
+ * Add (or remove) the blocking hooks that let the card answer. Pure transform of hooks.json text.
+ * Returns { text, changed } or { error }.
+ */
+export function rewriteHooks(text, { command, enable }) {
+  let json = {};
+  if (text?.trim()) {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return { error: "not valid JSON" };
+    }
+  }
+  const before = JSON.stringify(json);
+  json.hooks ||= {};
+  for (const ev of ASK_EVENTS) {
+    const groups = (json.hooks[ev] || [])
+      .map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !isOurCommand(h.command)) }))
+      .filter((g) => g.hooks.length);
+    if (enable) groups.push({ hooks: [{ type: "command", command, timeout: ASK_HOOK_TIMEOUT_SEC, statusMessage: "Waiting for Earpiece" }] });
+    if (groups.length) json.hooks[ev] = groups;
+    else delete json.hooks[ev];
+  }
+  if (!Object.keys(json.hooks).length) delete json.hooks;
+  const after = JSON.stringify(json);
+  return { text: JSON.stringify(json, null, 2) + "\n", changed: before !== after };
+}
+const MARKER = "# Earpiece voice pings";
+const OLD_MARKERS = [MARKER, "# Jarvis voice pings"]; // lines we wrote, before and after the rename
 const SEEN_MS = 10 * 60_000;
 
 // Reads a TOML `notify = [ ... ]` value starting at lines[idx], single- or multi-line,
@@ -90,7 +124,7 @@ export function rewriteToml(text, { ours, uninstall = false, chain = false, save
   const notifyText = span ? lines.slice(notifyIdx, span.end + 1).join("\n") : "";
   let chainSaved = null;
 
-  if (notifyIdx >= 0 && !isJarvisCommand(notifyText)) {
+  if (notifyIdx >= 0 && !isOurCommand(notifyText)) {
     if (uninstall) return { text, changed: false };
     if (!chain)
       return {
@@ -98,16 +132,16 @@ export function rewriteToml(text, { ours, uninstall = false, chain = false, save
         changed: false,
         message:
           `! ${tomlFile()} already has a notify command:\n    ${span.value ? JSON.stringify(span.value) : notifyText.trim()}\n` +
-          "  Left it alone. Re-run with --chain to keep it AND add Jarvis (Jarvis speaks, then forwards the event to it).",
+          "  Left it alone. Re-run with --chain to keep it AND add Earpiece (Earpiece speaks, then forwards the event to it).",
       };
     if (!span.value)
       return { text, changed: false, message: `! Couldn't parse the existing notify value; left it alone. Replace it manually with:\n    ${ours}` };
     chainSaved = span.value;
   }
   if (notifyIdx >= 0) lines.splice(notifyIdx, span.end - notifyIdx + 1);
-  const out = lines.filter((l) => !l.startsWith(MARKER));
+  const out = lines.filter((l) => !OLD_MARKERS.some((m) => l.startsWith(m)));
   let restored = false;
-  if (!uninstall) out.unshift(`${MARKER} (jarvis-voice)`, ours); // top-level keys must precede any [table]
+  if (!uninstall) out.unshift(`${MARKER} (earpiece)`, ours); // top-level keys must precede any [table]
   else if (savedChain?.length) {
     out.unshift(`notify = [${savedChain.map((s) => JSON.stringify(s)).join(", ")}]`);
     restored = true;
@@ -132,19 +166,31 @@ export default {
     ];
   },
 
+  // Blocking hooks (`earpiece ask codex`): a question the card can answer, or null.
+  // Codex doesn't accept updatedPermissions yet (it fails closed), so there is no "always allow".
+  toAsk(p) {
+    if (p.hook_event_name === "PermissionRequest") return permissionAsk("codex", p, { alwaysAllow: false });
+    if (p.hook_event_name === "Stop") return replyAsk("codex", p);
+    return null;
+  },
+
+  askOutput(p, ask, answer) {
+    return ask.kind === "permission" ? permissionOutput(p, answer, { alwaysAllow: false }) : replyOutput(answer);
+  },
+
   // Forward the raw payload to the user's original notify command, if the installer chained one.
-  // The chained command may itself call Jarvis again (e.g. a wrapper whose --previous-notify is
-  // Jarvis). JARVIS_FORWARDED=1 marks that call so it neither speaks nor forwards a second time;
+  // The chained command may itself call Earpiece again (e.g. a wrapper whose --previous-notify is
+  // Earpiece). EARPIECE_FORWARDED=1 marks that call so it neither speaks nor forwards a second time;
   // firstSeen() below catches wrappers that drop the environment.
   forward(raw) {
-    if (process.env.JARVIS_FORWARDED === "1") return false;
+    if (process.env.EARPIECE_FORWARDED === "1") return false;
     const chain = config().codexChain;
     if (!Array.isArray(chain) || !chain.length) return false;
-    // A chain that runs Jarvis directly would only loop. (A wrapper that calls Jarvis later is
+    // A chain that runs Earpiece directly would only loop. (A wrapper that calls Earpiece later is
     // fine: the env flag and firstSeen() stop the echo.)
-    if (chain.slice(0, 2).some((a) => /jarvis\.mjs$/.test(String(a)))) return false;
+    if (chain.slice(0, 2).some((a) => /(?:earpiece|jarvis)\.mjs$/.test(String(a)))) return false;
     try {
-      spawn(chain[0], [...chain.slice(1), raw], { detached: true, stdio: "ignore", env: { ...process.env, JARVIS_FORWARDED: "1" } })
+      spawn(chain[0], [...chain.slice(1), raw], { detached: true, stdio: "ignore", env: { ...process.env, EARPIECE_FORWARDED: "1", JARVIS_FORWARDED: "1" } })
         .on("error", (e) => log({ warn: "codex_chain_failed", error: String(e.message || e) }))
         .unref();
       return true;
@@ -180,13 +226,37 @@ export default {
 
   isInstalled() {
     try {
-      return isJarvisCommand(fs.readFileSync(tomlFile(), "utf8"));
+      return isOurCommand(fs.readFileSync(tomlFile(), "utf8"));
     } catch {
       return false;
     }
   },
 
-  install({ node, bin, cmd, uninstall = false, chain = false }) {
+  install(opts) {
+    return [...installNotify(opts), ...installAsk(opts)];
+  },
+};
+
+function installAsk({ node, bin, cmd, uninstall = false, ask = false }) {
+  const file = hooksFile();
+  const exists = fs.existsSync(file);
+  if (!exists && (uninstall || !ask)) return [];
+  const command = `${commandPrefix({ cmd, node, bin }).map(quote).join(" ")} ask codex`;
+  const r = rewriteHooks(exists ? fs.readFileSync(file, "utf8") : "", { command, enable: ask && !uninstall });
+  if (r.error) return [`✗ ${file} is ${r.error}. Fix it first; nothing changed.`];
+  if (!r.changed) return [];
+  const b = backup(file);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, r.text);
+  const on = ask && !uninstall;
+  return [
+    `✓ Codex approval hooks ${on ? "added to" : "removed from"} ${file}${b ? `  (backup: ${path.basename(b)})` : ""}`,
+    ...(on ? ["• Codex asks you to trust new hooks once: run /hooks in Codex and trust the Earpiece ones."] : []),
+  ];
+}
+
+function installNotify({ node, bin, cmd, uninstall = false, chain = false }) {
+  {
     const file = tomlFile();
     const exists = fs.existsSync(file);
     if (!exists && uninstall) return [];
@@ -197,7 +267,7 @@ export default {
     if (!r.changed) return msgs;
     if (r.chainSaved) {
       updateConfig({ codexChain: r.chainSaved });
-      msgs.push(`• Kept your existing Codex notify (${r.chainSaved.join(" ")}); Jarvis will forward events to it.`);
+      msgs.push(`• Kept your existing Codex notify (${r.chainSaved.join(" ")}); Earpiece will forward events to it.`);
     }
     if (r.restored) updateConfig({ codexChain: null });
     const b = backup(file);
@@ -205,5 +275,5 @@ export default {
     fs.writeFileSync(file, r.text);
     msgs.push(`✓ Codex notify ${uninstall ? "removed from" : "added to"} ${file}${b ? `  (backup: ${path.basename(b)})` : ""}`);
     return msgs;
-  },
-};
+  }
+}

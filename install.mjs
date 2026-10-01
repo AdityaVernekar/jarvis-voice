@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Installs Jarvis for every supported agent. Same as `jarvis install`.
+// Installs Earpiece for every supported agent. Same as `earpiece install`.
 //   node install.mjs [--only claude-code,codex] [--chain] [--env path/.env]
 //   node install.mjs --uninstall
 import { run } from "./src/cli/main.mjs";

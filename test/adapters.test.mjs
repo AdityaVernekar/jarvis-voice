@@ -44,7 +44,7 @@ test("notifySpan parses single and multi-line arrays", () => {
 });
 
 test("rewriteToml installs at top level, refuses to clobber, chains and restores", () => {
-  const ours = 'notify = ["/node", "/j/bin/jarvis.mjs", "codex"]';
+  const ours = 'notify = ["/node", "/j/bin/earpiece.mjs", "codex"]';
   const fresh = rewriteToml('model = "o3"\n[tui]\nx = 1\n', { ours });
   assert.ok(fresh.text.indexOf(ours) < fresh.text.indexOf("[tui]"));
 
@@ -63,7 +63,7 @@ test("rewriteToml installs at top level, refuses to clobber, chains and restores
   const undone = rewriteToml(chained.text, { ours, uninstall: true, savedChain: chained.chainSaved });
   assert.ok(undone.restored);
   assert.match(undone.text, /^notify = \["notifier", "-t"\]/);
-  assert.ok(!undone.text.includes("jarvis"));
+  assert.ok(!undone.text.includes("earpiece"));
 });
 
 test("firstTableLine skips brackets inside top-level arrays and strings", async () => {
@@ -71,17 +71,17 @@ test("firstTableLine skips brackets inside top-level arrays and strings", async 
   assert.equal(firstTableLine(["a = 1", "[tui]"]), 1);
   assert.equal(firstTableLine(["profiles = [", '  ["a"],', "]", 'notify = ["x"]', "[tui]"]), 4);
   assert.equal(firstTableLine(['s = """', "[not a table]", '"""', "[t]"]), 3);
-  const ours = 'notify = ["/n", "/j/bin/jarvis.mjs", "codex"]';
+  const ours = 'notify = ["/n", "/j/bin/earpiece.mjs", "codex"]';
   const r = rewriteToml('profiles = [\n  ["a"],\n]\nnotify = ["x"]\n[tui]\n', { ours });
   assert.equal(r.changed, false); // saw the existing notify instead of adding a duplicate
   assert.equal(rewriteToml('notify = ["a"]\nnotify = ["b"]\n', { ours, chain: true }).changed, false);
 });
 
-test("isJarvisCommand only matches commands Jarvis wrote", async () => {
-  const { isJarvisCommand } = await import("../src/adapters/install-util.mjs");
-  assert.ok(isJarvisCommand('"/usr/bin/node" "/x/bin/jarvis.mjs" hook claude-code'));
-  assert.ok(isJarvisCommand('"/usr/bin/node" "/x/jarvis.mjs" hook'));
-  assert.ok(isJarvisCommand('notify = ["/usr/bin/node", "/x/jarvis.mjs", "codex"]'));
-  assert.ok(!isJarvisCommand('notify = ["node", "/other/jarvis.mjs", "--notify"]'));
-  assert.ok(!isJarvisCommand("node ~/bots/jarvis.mjs remind"));
+test("isOurCommand only matches commands Earpiece wrote", async () => {
+  const { isOurCommand } = await import("../src/adapters/install-util.mjs");
+  assert.ok(isOurCommand('"/usr/bin/node" "/x/bin/earpiece.mjs" hook claude-code'));
+  assert.ok(isOurCommand('"/usr/bin/node" "/x/jarvis.mjs" hook'));
+  assert.ok(isOurCommand('notify = ["/usr/bin/node", "/x/jarvis.mjs", "codex"]'));
+  assert.ok(!isOurCommand('notify = ["node", "/other/jarvis.mjs", "--notify"]'));
+  assert.ok(!isOurCommand("node ~/bots/jarvis.mjs remind"));
 });

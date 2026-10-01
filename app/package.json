@@ -1,9 +1,9 @@
 {
-  "name": "jarvis-voice-app",
-  "productName": "Jarvis Voice",
-  "version": "0.1.0",
+  "name": "earpiece-app",
+  "productName": "Earpiece",
+  "version": "0.3.0",
   "private": true,
-  "description": "Mac app for jarvis-voice: spoken pings for your coding agents, no terminal needed.",
+  "description": "Mac app for earpiece: spoken pings for your coding agents, no terminal needed.",
   "type": "module",
   "main": "main/main.mjs",
   "author": "Aditya Vernekar",
@@ -13,15 +13,15 @@
     "pack": "electron-builder --mac --dir",
     "dist": "electron-builder --mac --universal",
     "dist:arm64": "electron-builder --mac --arm64",
-    "bench": "node ../scripts/bench-hook.mjs --electron \"$PWD/dist/mac-universal/Jarvis Voice.app/Contents/MacOS/Jarvis Voice\""
+    "bench": "node ../scripts/bench-hook.mjs --electron \"$PWD/dist/mac-universal/Earpiece.app/Contents/MacOS/Earpiece\""
   },
   "devDependencies": {
     "electron": "^44.5.1",
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "io.github.adityavernekar.jarvisvoice",
-    "productName": "Jarvis Voice",
+    "appId": "dev.earpiece.mac",
+    "productName": "Earpiece",
     "directories": { "output": "dist", "buildResources": "build" },
     "files": ["main/**", "preload/**", "renderer/**", "build/tray*.png", "package.json"],
     "extraResources": [
@@ -41,7 +41,7 @@
       "gatekeeperAssess": false,
       "extendInfo": { "NSHumanReadableCopyright": "MIT License" }
     },
-    "dmg": { "sign": false, "title": "Jarvis Voice" },
+    "dmg": { "sign": false, "title": "Earpiece" },
     "publish": null
   }
 }

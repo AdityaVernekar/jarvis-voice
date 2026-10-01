@@ -1,12 +1,14 @@
-// Claude Desktop adapter. Desktop chats and Cowork have no hooks, so Jarvis registers a small
-// MCP server (`jarvis mcp`, see src/mcp/server.mjs) in claude_desktop_config.json. Claude calls
-// its jarvis_notify tool when it finishes real work or needs you; the server sends hub events.
+// Claude Desktop adapter. Desktop chats and Cowork have no hooks, so Earpiece registers a small
+// MCP server (`earpiece mcp`, see src/mcp/server.mjs) in claude_desktop_config.json. Claude calls
+// its earpiece_notify tool when it finishes real work or needs you; the server sends hub events.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { backup, commandPrefix } from "./install-util.mjs";
 
-export const SERVER_KEY = "jarvis-voice";
+export const SERVER_KEY = "earpiece";
+// The key used before the rename. Install and uninstall both remove it, so Claude never runs two.
+export const LEGACY_KEYS = ["jarvis-voice"];
 // "Claude" is the standard app. Other builds (for example ones set up by an organisation) keep
 // their own support folder next to it; every one that exists gets the server.
 const APP_DIRS = ["Claude", "Claude-3p"];
@@ -34,7 +36,8 @@ export default {
   isInstalled() {
     return configFiles().some((f) => {
       try {
-        return Boolean(read(f).mcpServers?.[SERVER_KEY]);
+        const servers = read(f).mcpServers || {};
+        return [SERVER_KEY, ...LEGACY_KEYS].some((k) => Boolean(servers[k]));
       } catch {
         return false;
       }
@@ -56,20 +59,22 @@ export default {
         continue;
       }
       const cur = cfg.mcpServers?.[SERVER_KEY];
-      if (uninstall ? !cur : JSON.stringify(cur) === JSON.stringify(entry)) {
-        if (!uninstall) out.push(`✓ ${appName(file)}: Jarvis already connected`);
+      const legacy = LEGACY_KEYS.some((k) => cfg.mcpServers?.[k]);
+      if (!legacy && (uninstall ? !cur : JSON.stringify(cur) === JSON.stringify(entry))) {
+        if (!uninstall) out.push(`✓ ${appName(file)}: Earpiece already connected`);
         continue;
       }
       const b = backup(file);
       cfg.mcpServers = { ...(cfg.mcpServers || {}) };
+      for (const k of LEGACY_KEYS) delete cfg.mcpServers[k];
       if (uninstall) delete cfg.mcpServers[SERVER_KEY];
       else cfg.mcpServers[SERVER_KEY] = entry;
       if (!Object.keys(cfg.mcpServers).length) delete cfg.mcpServers;
-      const tmp = `${file}.jarvis-${process.pid}.tmp`;
+      const tmp = `${file}.earpiece-${process.pid}.tmp`;
       fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n");
       fs.renameSync(tmp, file);
       out.push(
-        `✓ ${appName(file)}: Jarvis MCP server ${uninstall ? "removed from" : "added to"} ${file}${b ? `  (backup: ${path.basename(b)})` : ""}`,
+        `✓ ${appName(file)}: Earpiece MCP server ${uninstall ? "removed from" : "added to"} ${file}${b ? `  (backup: ${path.basename(b)})` : ""}`,
       );
     }
     if (!uninstall && out.some((l) => l.includes("added to"))) out.push("  Quit and reopen Claude Desktop to load it.");

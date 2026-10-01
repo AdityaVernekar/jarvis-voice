@@ -21,6 +21,9 @@ export const DEFAULTS = {
   // During quiet hours only the kinds in `allow` are spoken. allow: [] = total silence; null disables.
   quietHours: { start: "23:00", end: "08:00", allow: ["needs_input"] },
   chimes: true,
+  // Approve/deny tool requests and reply to questions from the floating card. Off until you turn it
+  // on: it installs blocking hooks (Claude Code, Codex) that wait for the card.
+  answerFromCard: false,
   announceAgent: false, // prefix lines with the agent name ("Codex, checkout. …")
   // Per-agent overrides, keyed by adapter id:
   //   { "codex": { "voice": "sophie", "minTurnSeconds": 0 }, "claude-code": { "enabled": true } }
@@ -63,7 +66,7 @@ export function agentConfig(cfg, agentId) {
   };
 }
 
-// Key lookup order: environment, then cfg.envFile, then ~/.jarvis-voice/.env. Never logged.
+// Key lookup order: environment, then cfg.envFile, then ~/.earpiece/.env. Never logged.
 export function apiKey(cfg, name = "OPENAI_API_KEY") {
   if (process.env[name]) return process.env[name];
   const re = new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=\\s*(.*)\\s*$`);

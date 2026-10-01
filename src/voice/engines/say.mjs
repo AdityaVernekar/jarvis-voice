@@ -6,7 +6,8 @@ export default {
   id: "say",
   label: "System voice",
   keyName: null,
-  async speak(text, { cfg, lang }) {
+  async speak(text, { cfg, lang, ready }) {
+    await ready?.(); // no API to wait for: the voice starts right away
     const hindi = lang === "hi" || lang === "hinglish";
     if (which("say")) {
       const voice = hindi ? "Lekha" : cfg.sayVoice;

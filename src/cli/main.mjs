@@ -1,17 +1,20 @@
-// Command-line interface. Every entry point (bin/jarvis.mjs, the legacy ./jarvis.mjs,
+// Command-line interface. Every entry point (bin/earpiece.mjs, the legacy ./jarvis.mjs,
 // ./install.mjs) ends up in main().
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { getAdapter, listAdapters } from "../adapters/index.mjs";
 import { agentConfig, apiKey, config, updateConfig } from "../config.mjs";
+import { ASK_CURL_TIMEOUT_SEC } from "../hub/asks.mjs";
 import { EVENT_TYPES, normalizeEvent } from "../hub/events.mjs";
 import { handleCodex } from "../hub/entry.mjs";
 import { ingest, ingestEvent, runWorker } from "../hub/hub.mjs";
 import { startHubServer } from "../hub/server.mjs";
 import { stopSpeaking } from "../control.mjs";
 import { writeShim } from "../shim.mjs";
-import { listSessions } from "../hub/sessions.mjs";
+import { betterOrigin, describeOrigin, jumpPrecision, rawFromEnv, resolveOrigin } from "../hub/origin.mjs";
+import { listSessions, updateSession } from "../hub/sessions.mjs";
 import { isKnownLang, LANG_NAMES, langLabel, phrase } from "../i18n.mjs";
 import { BIN, HOME, P, ROOT } from "../paths.mjs";
 import { currentMode, inQuietHours, QUIET_ALLOW_DEFAULT, setMode } from "../policy.mjs";
@@ -22,44 +25,48 @@ import { speak } from "../voice/speak.mjs";
 
 const pkg = readJson(path.join(ROOT, "package.json"), {});
 
-export const HELP = `jarvis-voice ${pkg.version || ""} — spoken pings for terminal coding agents
+export const HELP = `earpiece ${pkg.version || ""} — spoken pings for terminal coding agents
 
 Setup
-  jarvis install [--only claude-code,codex,claude-desktop] [--chain] [--env path/.env] [--hub | --node]
-                                      hooks already set by the Mac app stay on the app (--node overrides)
-  jarvis env <path/.env>              where API keys are read from (the app uses this too)
-  jarvis uninstall
-  jarvis test [--provider smallest|openai|say] [--agent id]
+  earpiece install [--only claude-code,codex,claude-desktop] [--chain] [--env path/.env] [--hub | --node]
+                                        hooks already set by the Mac app stay on the app (--node overrides)
+  earpiece env <path/.env>              where API keys are read from (the app uses this too)
+  earpiece uninstall
+  earpiece test [--provider smallest|openai|say] [--agent id]
 
 Agents
-  jarvis agents [--all] [--json]      every agent session Jarvis has seen, and its state
-  jarvis emit --agent <id> --type <type> [--session s] [--project p] [--tool t] [--message m] [--wait] [text…]
-                                      send an event from any tool (JSON on stdin also works);
-                                      returns at once unless run in a terminal or with --wait
-                                      types: ${EVENT_TYPES.join(", ")}
-  jarvis run -- <cmd …>               run a command, speak when a long one finishes
+  earpiece agents [--all] [--json]      every agent session Earpiece has seen, and its state
+  earpiece where [--here] [--refresh]   which terminal, tab and tmux pane each agent runs in (--here: this shell)
+  earpiece emit --agent <id> --type <type> [--session s] [--project p] [--tool t] [--message m] [--wait] [text…]
+                                        send an event from any tool (JSON on stdin also works);
+                                        returns at once unless run in a terminal or with --wait
+                                        types: ${EVENT_TYPES.join(", ")}
+  earpiece run -- <cmd …>               run a command, speak when a long one finishes
 
 Voice
-  jarvis say "text" [--kind done|needs_input|error|info] [--provider id] [--lang code]
-  jarvis voices [--gender female] [--accent indian] [--lang hi] [--std]
-  jarvis voice <id> [--agent id]      pick a Smallest voice (globally or for one agent)
-  jarvis lang <code>                  en | hinglish | hi | ta | mr | es | …
+  earpiece say "text" [--kind done|needs_input|error|info] [--provider id] [--lang code]
+  earpiece voices [--gender female] [--accent indian] [--lang hi] [--std]
+  earpiece voice <id> [--agent id]      pick a Smallest voice (globally or for one agent)
+  earpiece lang <code>                  en | hinglish | hi | ta | mr | es | …
 
 Control
-  jarvis quiet [minutes]              only "needs you" pings (default 60 min)
-  jarvis off [minutes]                silence everything (default: until \`on\`)
-  jarvis on
-  jarvis stop                         stop talking now and drop every queued line
-  jarvis serve                        run the hub in the foreground (what the desktop app does)
-                                      (install with --hub so hooks send to it)
-  jarvis quiet-hours [23:00-08:00] [--silent | --allow needs_input,error] [off]
-                                      nightly window; by default only "needs you" pings get through
-  jarvis status
+  earpiece quiet [minutes]              only "needs you" pings (default 60 min)
+  earpiece off [minutes]                silence everything (default: until \`on\`)
+  earpiece on
+  earpiece stop                         stop talking now and drop every queued line
+  earpiece serve                        run the hub in the foreground (what the desktop app does)
+                                        (install with --hub so hooks send to it)
+  earpiece quiet-hours [23:00-08:00] [--silent | --allow needs_input,error] [off]
+                                        nightly window; by default only "needs you" pings get through
+  earpiece answers on|off               approve/deny tool requests and reply to questions from the
+                                        floating card (Claude Code, Codex; needs the app or \`serve\`)
+  earpiece status
 
-Agent entry points (written by \`jarvis install\`)
-  jarvis hook [adapter]               Claude Code hooks (payload on stdin)
-  jarvis codex '<json>'               Codex CLI notify (payload as last argument)
-  jarvis mcp                          MCP server for Claude Desktop (stdio)
+Agent entry points (written by \`earpiece install\`)
+  earpiece hook [adapter]               Claude Code hooks (payload on stdin)
+  earpiece ask [adapter]                blocking hook that waits for the card (only with \`answers on\`)
+  earpiece codex '<json>'               Codex CLI notify (payload as last argument)
+  earpiece mcp                          MCP server for Claude Desktop (stdio)
 `;
 
 // Hooks pipe a small payload and close stdin. The timeout covers callers that leave it open.
@@ -112,20 +119,20 @@ async function cmdEmit(rest) {
   if (words.length) ev.text = words.join(" ");
   if (!EVENT_TYPES.includes(ev.type)) {
     process.exitCode = 2;
-    return console.error(`jarvis: unknown --type "${ev.type}" (expected ${EVENT_TYPES.join(", ")})`);
+    return console.error(`earpiece: unknown --type "${ev.type}" (expected ${EVENT_TYPES.join(", ")})`);
   }
   // `emit` takes hub-shaped events (no adapter translation), even for agents that have an adapter.
   // From a terminal it waits and prints the line; from a hook or script it hands off to the
   // background worker and returns at once. --wait / --background override.
   const interactive = Boolean(process.stdout.isTTY);
-  if (interactive) process.env.JARVIS_ECHO = "1";
-  const foreground = flags.wait ? true : flags.background ? false : interactive || process.env.JARVIS_FOREGROUND === "1";
+  if (interactive) process.env.EARPIECE_ECHO = "1";
+  const foreground = flags.wait ? true : flags.background ? false : interactive || process.env.EARPIECE_FOREGROUND === "1";
   return ingestEvent(normalizeEvent(ev, agent), { foreground });
 }
 
 async function cmdRun(rest) {
   const args = rest[0] === "--" ? rest.slice(1) : rest;
-  if (!args.length) return console.error("usage: jarvis run -- <command …>");
+  if (!args.length) return console.error("usage: earpiece run -- <command …>");
   const cfg = agentConfig(config(), "run");
   const start = now();
   const r = spawnSync(args[0], args.slice(1), { stdio: "inherit" });
@@ -135,7 +142,7 @@ async function cmdRun(rest) {
   const project = projectName(process.cwd());
   const ph = phrase(cfg, code === 0 ? "runOk" : "runFail", project, label);
   if (durationMs >= cfg.minTurnSeconds * 1000) {
-    if (process.stdout.isTTY) process.env.JARVIS_ECHO = "1";
+    if (process.stdout.isTTY) process.env.EARPIECE_ECHO = "1";
     await ingestEvent(normalizeEvent({
       agent: "run",
       type: code === 0 ? "turn_end" : "error",
@@ -167,7 +174,7 @@ async function cmdVoices(rest) {
     console.log(
       (v.voiceId === cfg.smallest.voice ? "*" : " ") + pad(v.voiceId, 13) + pad(v.tags.gender, 8) + pad(v.tags.accent, 12) + pad(v.tags.age, 12) + v.tags.language.join(", "),
     );
-  console.log(`\n* = current. Set with: jarvis voice <id> [--agent codex]`);
+  console.log(`\n* = current. Set with: earpiece voice <id> [--agent codex]`);
 }
 
 async function cmdVoice(rest) {
@@ -182,12 +189,12 @@ async function cmdVoice(rest) {
   const v = await findVoice(cfg, id);
   if (!v) {
     process.exitCode = 1;
-    return console.error(`jarvis: no Smallest voice "${id}". See: jarvis voices --gender female`);
+    return console.error(`earpiece: no Smallest voice "${id}". See: earpiece voices --gender female`);
   }
   if (flags.agent) updateConfig({ agents: { [flags.agent]: { ...(cfg.agents[flags.agent] || {}), voice: id, model: v.model } } });
   else updateConfig({ smallest: { ...cfg.smallest, voice: id, model: v.model } });
-  console.log(`jarvis: ${flags.agent ? `${flags.agent} voice` : "voice"} → ${id} (${v.model}; ${v.tags.gender} ${v.tags.accent}; ${v.tags.language.join(", ")})`);
-  console.log(`  hear it: jarvis test${flags.agent ? ` --agent ${flags.agent}` : ""}`);
+  console.log(`earpiece: ${flags.agent ? `${flags.agent} voice` : "voice"} → ${id} (${v.model}; ${v.tags.gender} ${v.tags.accent}; ${v.tags.language.join(", ")})`);
+  console.log(`  hear it: earpiece test${flags.agent ? ` --agent ${flags.agent}` : ""}`);
 }
 
 async function cmdLang(rest) {
@@ -195,16 +202,16 @@ async function cmdLang(rest) {
   if (!code) return console.log(`speakLanguage: ${config().speakLanguage}   (en | hinglish | hi | ta | mr | kn | …)`);
   if (!isKnownLang(code)) {
     process.exitCode = 1;
-    return console.error(`jarvis: unknown language "${code}". Try en, hinglish, hi, ta, te, kn, ml, mr, gu, bn, pa, or, es, fr, de …`);
+    return console.error(`earpiece: unknown language "${code}". Try en, hinglish, hi, ta, te, kn, ml, mr, gu, bn, pa, or, es, fr, de …`);
   }
   updateConfig({ speakLanguage: code });
   const cfg = config();
-  console.log(`jarvis: summaries now spoken in ${langLabel(code)}`);
+  console.log(`earpiece: summaries now spoken in ${langLabel(code)}`);
   if (code !== "en" && code !== "hinglish" && apiKey(cfg, "SMALLEST_API_KEY")) {
     const v = (await fetchVoices(cfg, cfg.smallest.model).catch(() => [])).find((x) => x.voiceId === cfg.smallest.voice);
     const want = (LANG_NAMES[code] || "").toLowerCase();
     if (v && want && !v.tags.language.includes(want))
-      console.log(`  ! voice "${cfg.smallest.voice}" isn't trained on ${LANG_NAMES[code]}. Pick one: jarvis voices --lang ${code}`);
+      console.log(`  ! voice "${cfg.smallest.voice}" isn't trained on ${LANG_NAMES[code]}. Pick one: earpiece voices --lang ${code}`);
   }
 }
 
@@ -213,7 +220,7 @@ function cmdAgents(rest) {
   const sessions = listSessions({ sinceMs: flags.all ? null : 24 * 3600_000 });
   if (flags.json) return console.log(JSON.stringify(sessions, null, 2));
   if (!sessions.length)
-    return console.log(`No agent activity${flags.all ? "" : " in the last 24 h"}. Run \`jarvis install\`, then start Claude Code or Codex.`);
+    return console.log(`No agent activity${flags.all ? "" : " in the last 24 h"}. Run \`earpiece install\`, then start Claude Code or Codex.`);
   const icon = { working: "●", waiting: "◆", done: "✓", error: "✗", idle: "○" };
   console.log(pad("STATUS", 10) + pad("AGENT", 14) + pad("PROJECT", 22) + pad("AGE", 6) + "LAST");
   for (const s of sessions) {
@@ -228,18 +235,64 @@ function cmdAgents(rest) {
   console.log(`\n${working} working, ${waiting} waiting on you, ${sessions.length} total`);
 }
 
+// Which terminal is each agent in? `--here` shows what Earpiece sees from the shell you run it in,
+// which is the quickest way to check the detection for a terminal setup.
+async function cmdWhere(rest) {
+  const { flags } = parseFlags(rest, []);
+  if (flags.here) {
+    const raw = rawFromEnv();
+    if (!raw) return console.log("earpiece: couldn't read this shell's process id.");
+    const o = await resolveOrigin(raw, { agent: "" });
+    if (flags.json) return console.log(JSON.stringify(o, null, 2));
+    console.log(`This shell: ${describeOrigin(o)}`);
+    console.log(`  terminal app   ${o.app ? `${o.app.name}${o.app.bundle ? ` (${o.app.bundle})` : ""}` : "not found"}`);
+    console.log(`  tty            ${o.tty || "none"}${o.tabTty && o.tabTty !== o.tty ? `  (terminal tab: ${o.tabTty})` : ""}`);
+    console.log(`  tmux           ${o.tmux ? `${o.tmux.session ?? "?"}:${o.tmux.window ?? "?"}.${o.tmux.paneIndex ?? "?"} pane ${o.tmux.pane}${o.tmux.clients ? `, ${o.tmux.clients} client(s)` : ", no client attached"}` : "no"}`);
+    console.log(`  iTerm session  ${o.iterm || "n/a"}`);
+    console.log(`  found through  ${o.via.join(", ") || "nothing"}`);
+    console.log(`  a click would  ${o.jump === "none" ? "not know where to go" : `${o.jump} (${jumpPrecision(o)})`}`);
+    return;
+  }
+  const sessions = listSessions({ sinceMs: flags.all ? null : 24 * 3600_000 });
+  if (flags.refresh) {
+    for (const s of sessions) {
+      if (!s.origin?.raw) continue;
+      try {
+        const fresh = await resolveOrigin(s.origin.raw, { agent: s.agent });
+        if (!betterOrigin(s.origin, fresh)) continue; // the agent is gone or a lookup failed: keep what we knew
+        s.origin = fresh;
+        updateSession(s.agent, s.session, { origin: fresh }, { touch: false });
+      } catch {}
+    }
+  }
+  if (flags.json) return console.log(JSON.stringify(sessions.map((s) => ({ agent: s.agent, session: s.session, project: s.project || null, cwd: s.cwd || null, origin: s.origin || null })), null, 2));
+  if (!sessions.length) return console.log(`No agent activity${flags.all ? "" : " in the last 24 h"}.`);
+  console.log(pad("AGENT", 14) + pad("PROJECT", 20) + pad("TERMINAL", 12) + pad("TTY", 10) + pad("TMUX", 16) + "CLICK LANDS ON");
+  let unknown = 0;
+  for (const s of sessions) {
+    const o = s.origin;
+    const name = agentConfig(config(), s.agent).label || getAdapter(s.agent).name;
+    if (!o) unknown++;
+    const tmux = o?.tmux?.session ? `${o.tmux.session}:${o.tmux.window ?? "?"}.${o.tmux.paneIndex ?? "?"}` : o?.tmux ? o.tmux.pane : "-";
+    console.log(
+      pad(name, 14) + pad(s.project || projectName(s.cwd), 20) + pad(o ? o.app?.name || "?" : "?", 12) + pad(o?.tty ? o.tty.replace("/dev/", "") : "-", 10) + pad(tmux, 16) + (o ? jumpPrecision(o) : "not seen yet"),
+    );
+  }
+  if (unknown) console.log(`\n${unknown} session${unknown === 1 ? "" : "s"} not located yet: location is learned from each agent's next hook (restart it, or send a prompt).`);
+}
+
 // Silence what's playing and throw away everything queued. Lines already waiting for the
 // speaker see the flush marker and drop themselves; stray workers and players are killed.
 function cmdStop() {
   const { jobs, killed } = stopSpeaking();
-  console.log(`jarvis: stopped. Cleared ${jobs} queued job${jobs === 1 ? "" : "s"}${killed.length ? `, killed ${killed.join(" and ")}` : ""}.`);
+  console.log(`earpiece: stopped. Cleared ${jobs} queued job${jobs === 1 ? "" : "s"}${killed.length ? `, killed ${killed.join(" and ")}` : ""}.`);
 }
 
 // Run the hub in the foreground: hooks sent to the socket are handled in this process.
 // The desktop app does the same thing; this is for people who only want the CLI.
 async function cmdServe() {
   const hub = await startHubServer();
-  console.log(`jarvis: hub listening on ${hub.socket}. Ctrl-C to stop.`);
+  console.log(`earpiece: hub listening on ${hub.socket}. Ctrl-C to stop.`);
   const bye = () => hub.close().then(() => process.exit(0));
   process.on("SIGINT", bye);
   process.on("SIGTERM", bye);
@@ -254,20 +307,20 @@ const describeQuiet = (qh) =>
         return allow.length ? `only ${allow.join(" and ")} pings get through` : "completely silent";
       })()}`;
 
-// jarvis quiet-hours 21:00-08:00 --silent  |  --allow needs_input,error  |  off
+// earpiece quiet-hours 21:00-08:00 --silent  |  --allow needs_input,error  |  off
 function cmdQuietHours(rest) {
   const { flags, words } = parseFlags(rest, ["allow"]);
   const cur = config().quietHours;
   if (words[0] === "off") {
     updateConfig({ quietHours: null });
-    return console.log("jarvis: quiet hours: off");
+    return console.log("earpiece: quiet hours: off");
   }
   if (!words.length && !flags.silent && !flags.allow) return console.log(describeQuiet(cur));
   const range = words.join(" ").replace(/\s*(-|to)\s*/, " ").split(/\s+/).filter(Boolean);
   const [start, end] = range.length ? range : [cur?.start || "23:00", cur?.end || "08:00"];
   if (!HHMM.test(start) || !HHMM.test(end)) {
     process.exitCode = 2;
-    return console.error("usage: jarvis quiet-hours 23:00-08:00 [--silent | --allow needs_input,error] | off");
+    return console.error("usage: earpiece quiet-hours 23:00-08:00 [--silent | --allow needs_input,error] | off");
   }
   const kinds = ["done", "needs_input", "error", "info"];
   let allow = Array.isArray(cur?.allow) ? cur.allow : QUIET_ALLOW_DEFAULT;
@@ -277,12 +330,12 @@ function cmdQuietHours(rest) {
     const bad = allow.filter((k) => !kinds.includes(k));
     if (bad.length) {
       process.exitCode = 2;
-      return console.error(`jarvis: unknown kind "${bad[0]}" (expected ${kinds.join(", ")} or none)`);
+      return console.error(`earpiece: unknown kind "${bad[0]}" (expected ${kinds.join(", ")} or none)`);
     }
   }
   const qh = { start, end, allow };
   updateConfig({ quietHours: qh });
-  console.log(`jarvis: ${describeQuiet(qh)}`);
+  console.log(`earpiece: ${describeQuiet(qh)}`);
 }
 
 function cmdStatus() {
@@ -315,7 +368,7 @@ function cmdStatus() {
 
 async function cmdTest(rest) {
   const { flags } = parseFlags(rest, ["provider", "agent"]);
-  process.env.JARVIS_ECHO = "1";
+  process.env.EARPIECE_ECHO = "1";
   const cfg = flags.agent ? agentConfig(config(), flags.agent) : config();
   const ph = phrase(cfg, "test");
   const r = await speak(ph.text, "done", { src: "test", force: true, provider: flags.provider, lang: ph.lang, ...(flags.agent ? { agent: flags.agent } : {}) });
@@ -328,15 +381,15 @@ function cmdInstall(rest, uninstall = false) {
   uninstall ||= Boolean(flags.uninstall);
   ensureDirs();
   const only = flags.only ? String(flags.only).split(",").map((s) => s.trim()) : null;
-  const opts = { node: process.execPath, bin: BIN, uninstall, chain: Boolean(flags.chain) };
-  // --hub: hooks call the curl shim, which talks to `jarvis serve` or the desktop app.
+  const opts = { node: process.execPath, bin: BIN, uninstall, chain: Boolean(flags.chain), ask: config().answerFromCard === true };
+  // --hub: hooks call the curl shim, which talks to `earpiece serve` or the desktop app.
   // Hooks the Mac app set up stay on the shim, so re-running install doesn't disconnect the app;
   // --node switches back to calling this checkout directly.
   const onShim = !flags.node && !uninstall && usesShim(only);
   if (!uninstall && (flags.hub || onShim)) {
     // The app rewrites the shim with its own fallback on every launch; don't clobber it.
     opts.cmd = [onShim && fs.existsSync(P.shim) ? P.shim : writeShim()];
-    if (onShim && !flags.hub) console.log(`• Hooks go through ${P.shim} (the Mac app or \`jarvis serve\`); keeping that. Use --node to call this checkout directly.`);
+    if (onShim && !flags.hub) console.log(`• Hooks go through ${P.shim} (the Mac app or \`earpiece serve\`); keeping that. Use --node to call this checkout directly.`);
   }
   for (const a of listAdapters()) {
     if (!a.install || (only && !only.includes(a.id))) continue;
@@ -346,15 +399,48 @@ function cmdInstall(rest, uninstall = false) {
       console.log(`✗ ${a.name}: ${e.message}`);
     }
   }
-  if (uninstall) return console.log("\nJarvis hooks removed. Your settings in ~/.jarvis-voice were kept.");
+  if (uninstall) return console.log("\nEarpiece hooks removed. Your settings in ~/.earpiece were kept.");
 
   setEnvFile(flags.env);
-  console.log(`\nNext:\n  jarvis test          # you should hear Jarvis\n  jarvis agents        # see every agent session\n  Restart running Claude Code / Codex sessions so they pick up the hooks.`);
-  if (!process.env.PATH?.split(":").some((d) => fs.existsSync(path.join(d, "jarvis"))))
-    console.log(`\n  No \`jarvis\` on PATH yet. Either \`npm link\` in ${ROOT}, or:\n  alias jarvis='node "${BIN}"'`);
+  console.log(`\nNext:\n  earpiece test          # you should hear Earpiece\n  earpiece agents        # see every agent session\n  Restart running Claude Code / Codex sessions so they pick up the hooks.`);
+  if (!process.env.PATH?.split(":").some((d) => fs.existsSync(path.join(d, "earpiece"))))
+    console.log(`\n  No \`earpiece\` on PATH yet. Either \`npm link\` in ${ROOT}, or:\n  alias earpiece='node "${BIN}"'`);
 }
 
-// True when every installed Jarvis hook for these adapters already calls the shim.
+// POST the hook payload to the hub and print whatever it answers. Never throws, never fails the agent.
+async function cmdAsk(agent, raw) {
+  const body = raw || "{}";
+  const out = await new Promise((resolve) => {
+    if (!fs.existsSync(P.socket)) return resolve("");
+    const req = http.request(
+      { socketPath: P.socket, path: `/ask/${encodeURIComponent(agent)}`, method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }, timeout: ASK_CURL_TIMEOUT_SEC * 1000 },
+      (res) => {
+        let data = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => (data += c));
+        res.on("end", () => resolve(res.statusCode === 200 ? data : ""));
+        res.on("error", () => resolve(""));
+      },
+    );
+    req.on("timeout", () => (req.destroy(), resolve("")));
+    req.on("error", () => resolve(""));
+    req.end(body);
+  });
+  if (out) process.stdout.write(out);
+}
+
+// Turn "answer from the card" on or off, then rewrite the agents' hooks to match.
+function cmdAnswers(rest) {
+  const arg = (rest[0] || "").toLowerCase();
+  if (!["on", "off"].includes(arg)) {
+    return console.log(`Answer from the card is ${config().answerFromCard === true ? "on" : "off"}.\nUsage: earpiece answers on|off   (needs the Mac app or \`earpiece serve\` running)`);
+  }
+  updateConfig({ answerFromCard: arg === "on" });
+  console.log(`✓ Answer from the card: ${arg}`);
+  cmdInstall(["--only", "claude-code,codex"]);
+}
+
+// True when every installed Earpiece hook for these adapters already calls the shim.
 function usesShim(only) {
   const files = listAdapters()
     .filter((a) => a.install && a.configFile && (!only || only.includes(a.id)))
@@ -365,15 +451,15 @@ function usesShim(only) {
         return "";
       }
     })
-    .filter((t) => /jarvis(?:\.mjs|-hook)/.test(t));
-  return files.length > 0 && files.every((t) => t.includes("jarvis-hook"));
+    .filter((t) => /(?:earpiece|jarvis)(?:\.mjs|-hook)/.test(t));
+  return files.length > 0 && files.every((t) => /(?:earpiece|jarvis)-hook/.test(t));
 }
 
 function cmdEnv(rest) {
   const file = rest.find((a) => !a.startsWith("--"));
   if (!file) {
     const cfg = config();
-    return console.log(cfg.envFile ? `Keys are read from ${cfg.envFile}` : "No envFile set. Usage: jarvis env /path/to/.env");
+    return console.log(cfg.envFile ? `Keys are read from ${cfg.envFile}` : "No envFile set. Usage: earpiece env /path/to/.env");
   }
   if (!fs.existsSync(path.resolve(file))) {
     process.exitCode = 1;
@@ -383,7 +469,7 @@ function cmdEnv(rest) {
 }
 
 function setEnvFile(explicit) {
-  // Where API keys live: --env, else a .env next to this checkout. ~/.jarvis-voice/.env and the
+  // Where API keys live: --env, else a .env next to this checkout. ~/.earpiece/.env and the
   // environment are always read too (see apiKey()).
   const cfgNow = readJson(P.config, {});
   const guess = [explicit, path.join(ROOT, ".env")]
@@ -394,8 +480,8 @@ function setEnvFile(explicit) {
   if (guess && (explicit || !cfgNow.envFile)) updateConfig({ envFile: guess });
   const cfg = config();
   const keys = ["SMALLEST_API_KEY", "OPENAI_API_KEY"].filter((k) => apiKey(cfg, k));
-  console.log(`✓ Jarvis config at ${P.config}${cfg.envFile ? ` (keys from ${cfg.envFile})` : ""}`);
-  console.log(`  keys found: ${keys.length ? keys.join(", ") : "none — Jarvis will use your system voice"}`);
+  console.log(`✓ Earpiece config at ${P.config}${cfg.envFile ? ` (keys from ${cfg.envFile})` : ""}`);
+  console.log(`  keys found: ${keys.length ? keys.join(", ") : "none — Earpiece will use your system voice"}`);
 }
 
 // ---------- dispatch ----------
@@ -409,8 +495,16 @@ export async function main(argv) {
       const agent = rest[0] && !rest[0].startsWith("-") ? rest[0] : "claude-code";
       return ingest(agent, parseJson(await readStdin()));
     }
+    case "ask": {
+      // A blocking hook. Needs the hub (the desktop app or `earpiece serve`) to show the card;
+      // with none running it prints nothing and the agent's own prompt carries on.
+      const agent = rest[0] && !rest[0].startsWith("-") ? rest[0] : "claude-code";
+      return cmdAsk(agent, await readStdin());
+    }
+    case "answers":
+      return cmdAnswers(rest);
     case "codex":
-      return handleCodex(rest[rest.length - 1] || "{}", { forwarded: process.env.JARVIS_FORWARDED === "1" });
+      return handleCodex(rest[rest.length - 1] || "{}", { forwarded: process.env.EARPIECE_FORWARDED === "1" });
     case "serve":
       return cmdServe(rest);
     case "mcp": {
@@ -425,7 +519,7 @@ export async function main(argv) {
       return cmdRun(rest);
     case "say": {
       const { flags, words } = parseFlags(rest, ["kind", "provider", "lang", "agent"]);
-      process.env.JARVIS_ECHO = "1";
+      process.env.EARPIECE_ECHO = "1";
       const lang = flags.lang || (/[^\x00-\x7F]/.test(words.join(" ")) ? config().speakLanguage : "en");
       return speak(words.join(" "), flags.kind || "info", { src: "cli", provider: flags.provider, lang, ...(flags.agent ? { agent: flags.agent } : {}) });
     }
@@ -435,6 +529,8 @@ export async function main(argv) {
       return cmdVoice(rest);
     case "lang":
       return cmdLang(rest);
+    case "where":
+      return cmdWhere(rest);
     case "agents":
     case "ls":
       return cmdAgents(rest);
@@ -442,11 +538,11 @@ export async function main(argv) {
     case "off": {
       const mins = Number(rest[0]) || (cmd === "quiet" ? 60 : 0);
       setMode(cmd, mins);
-      return console.log(`jarvis: ${cmd}${mins ? ` for ${mins} min` : " until `jarvis on`"}`);
+      return console.log(`earpiece: ${cmd}${mins ? ` for ${mins} min` : " until `earpiece on`"}`);
     }
     case "on":
       setMode("on");
-      return console.log("jarvis: on");
+      return console.log("earpiece: on");
     case "status":
       return cmdStatus();
     case "stop":
@@ -475,18 +571,18 @@ export async function main(argv) {
     default:
       // stderr only: if this ever runs from a hook, stdout could be fed back to the agent.
       process.exitCode = 2;
-      console.error(`jarvis: unknown command "${cmd}". Run \`jarvis help\`.`);
+      console.error(`earpiece: unknown command "${cmd}". Run \`earpiece help\`.`);
   }
 }
 
 // Shared by every entry file. Hook paths never fail the agent because of a voice problem.
 export function run(argv = process.argv.slice(2)) {
-  const hookPath = ["hook", "codex", "_worker"].includes(argv[0]);
+  const hookPath = ["hook", "ask", "codex", "_worker"].includes(argv[0]);
   return main(argv).catch((e) => {
     log({ error: String(e?.stack || e), cmd: argv[0] });
     if (hookPath) process.exitCode = 0;
     else {
-      console.error(`jarvis: ${e?.message || e}`);
+      console.error(`earpiece: ${e?.message || e}`);
       process.exitCode = 1;
     }
   });

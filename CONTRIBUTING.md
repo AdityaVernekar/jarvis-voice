@@ -1,23 +1,23 @@
 # Contributing
 
-Thanks for helping. Jarvis is small on purpose, so a few ground rules keep it that way.
+Thanks for helping. Earpiece is small on purpose, so a few ground rules keep it that way.
 
 ## Setup
 
 ```bash
-git clone https://github.com/AdityaVernekar/jarvis-voice.git
-cd jarvis-voice
+git clone https://github.com/adissocrazy/earpiece.git
+cd earpiece
 npm test                        # node --test, no install step
-JARVIS_HOME=$(mktemp -d) JARVIS_DRY_RUN=1 JARVIS_FOREGROUND=1 node bin/jarvis.mjs emit --agent demo --type turn_end "It works."
+EARPIECE_HOME=$(mktemp -d) EARPIECE_DRY_RUN=1 EARPIECE_FOREGROUND=1 node bin/earpiece.mjs emit --agent demo --type turn_end "It works."
 ```
 
-`JARVIS_DRY_RUN=1` skips the network and audio and prints what would be said. Point `JARVIS_HOME` at a temp directory so you don't touch your real config or sessions.
+`EARPIECE_DRY_RUN=1` skips the network and audio and prints what would be said. Point `EARPIECE_HOME` at a temp directory so you don't touch your real config or sessions.
 
 ## Rules
 
 - No runtime dependencies. Node 20+ built-ins only (`fetch`, `node:test`, `node:child_process`).
 - Hooks must stay fast. Anything slower than reading a small file belongs in the worker (`processEvent` / adapter `enrich`).
-- Never break the agent. Hook entry points swallow errors and log them to `~/.jarvis-voice/log.jsonl`.
+- Never break the agent. Hook entry points swallow errors and log them to `~/.earpiece/log.jsonl`.
 - Installers back up before editing, never overwrite settings they didn't write, and can undo themselves.
 - Never log or print API keys, and never commit a `.env`.
 

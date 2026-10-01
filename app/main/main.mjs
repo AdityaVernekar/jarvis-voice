@@ -1,7 +1,7 @@
-// Jarvis Voice for Mac: runs the hub, with a main window (dashboard and settings) and a menu
-// bar popover for quick control. Hooks send events to ~/.jarvis-voice/hub.sock through the jarvis-hook shim; this process
+// Earpiece for Mac: runs the hub, with a main window (dashboard and settings) and a menu
+// bar popover for quick control. Hooks send events to ~/.earpiece/hub.sock through the earpiece-hook shim; this process
 // summarises and speaks them. The Node core in ../../src (Resources/core when packaged) does
-// the work, so the app and the `jarvis` CLI always behave the same.
+// the work, so the app and the `earpiece` CLI always behave the same.
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
 import fs from "node:fs";
 import path from "node:path";
@@ -15,12 +15,12 @@ const asset = (f) => path.join(APP_ROOT, "build", f);
 const core = (rel) => import(pathToFileURL(path.join(CORE, rel)).href);
 
 const DAY = 24 * 3600_000;
-let tray, popover, win, hub, dash, hubError = null;
+let tray, popover, win, hub, dash, asks = null, hubError = null;
 let quitting = false;
 let lib = {};
 const SECTIONS = ["overview", "agents", "voice", "quiet", "keys", "activity", "general"];
 
-// App preferences that aren't Jarvis settings (those live in ~/.jarvis-voice/config.json).
+// App preferences that aren't Earpiece settings (those live in ~/.earpiece/config.json).
 const prefs = {
   file: () => path.join(app.getPath("userData"), "prefs.json"),
   get() {
@@ -35,11 +35,23 @@ const prefs = {
       app.setLoginItemSettings({ openAtLogin: Boolean(value) });
       return { openAtLogin: app.getLoginItemSettings().openAtLogin };
     }
-    if (key !== "showInDock") throw new Error("unknown preference");
-    const next = { ...this.get(), showInDock: Boolean(value) };
+    if (key === "answerFromCard") {
+      // Lives in the shared config (the CLI reads it too). Turning it on or off rewrites the
+      // blocking hooks of the agents that are already connected.
+      lib.updateConfig({ answerFromCard: Boolean(value) });
+      if (!value) asks?.closeAll();
+      for (const id of ["claude-code", "codex"]) if (lib.getAdapter(id)?.isInstalled?.()) connectAgents(id);
+      return { answerFromCard: Boolean(value) };
+    }
+    if (key !== "showInDock" && key !== "showCard") throw new Error("unknown preference");
+    const next = { ...this.get(), [key]: Boolean(value) };
     fs.mkdirSync(path.dirname(this.file()), { recursive: true });
     fs.writeFileSync(this.file(), JSON.stringify(next, null, 2));
-    applyDock(next.showInDock);
+    if (key === "showInDock") applyDock(next.showInDock);
+    if (key === "showCard") {
+      asks?.setUi(next.showCard);
+      if (!next.showCard) (asks?.closeAll(), cardWin?.hide());
+    }
     return next;
   },
 };
@@ -55,14 +67,26 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on("second-instance", () => showMain());
   app.whenReady().then(start).catch((e) => {
-    dialog.showErrorBox("Jarvis Voice could not start", String(e?.stack || e));
+    dialog.showErrorBox("Earpiece could not start", String(e?.stack || e));
     app.quit();
   });
 }
 
+// The app was called Jarvis Voice before the rename; bring its preferences across once.
+function migratePrefs() {
+  try {
+    const old = path.join(app.getPath("appData"), "Jarvis Voice", "prefs.json");
+    if (!fs.existsSync(prefs.file()) && fs.existsSync(old)) {
+      fs.mkdirSync(path.dirname(prefs.file()), { recursive: true });
+      fs.copyFileSync(old, prefs.file());
+    }
+  } catch {}
+}
+
 async function start() {
+  migratePrefs();
   if (prefs.get().showInDock === false) app.dock?.hide();
-  const [paths, server, sessions, policy, config, adapters, control, shim, util] = await Promise.all([
+  const [paths, server, sessions, policy, config, adapters, control, shim, util, cards, askLib, originLib] = await Promise.all([
     core("src/paths.mjs"),
     core("src/hub/server.mjs"),
     core("src/hub/sessions.mjs"),
@@ -72,25 +96,31 @@ async function start() {
     core("src/control.mjs"),
     core("src/shim.mjs"),
     core("src/util.mjs"),
+    core("src/card.mjs"),
+    core("src/hub/asks.mjs"),
+    core("src/hub/origin.mjs"),
   ]);
-  lib = { ...paths, ...server, ...sessions, ...policy, ...config, ...adapters, ...control, ...shim, ...util };
+  lib = { ...paths, ...server, ...sessions, ...policy, ...config, ...adapters, ...control, ...shim, ...util, ...cards, ...askLib, ...originLib };
   lib.ensureDirs();
 
   // Re-written on every launch, so hooks keep working if the app is moved.
-  lib.shimFile = lib.writeShim({
-    fallback: [process.execPath, path.join(CORE, "bin", "jarvis.mjs")],
-    env: { ELECTRON_RUN_AS_NODE: "1" },
-  });
+  const shimOpts = { fallback: [process.execPath, path.join(CORE, "bin", "earpiece.mjs")], env: { ELECTRON_RUN_AS_NODE: "1" } };
+  lib.shimFile = lib.writeShim(shimOpts);
+  // Hooks installed before the rename call bin/jarvis-hook. Keep it current until they're reinstalled.
+  const legacyShim = path.join(path.dirname(lib.shimFile), "jarvis-hook");
+  if (fs.existsSync(legacyShim)) lib.writeShim(shimOpts, legacyShim);
 
   try {
-    hub = await lib.startHubServer({ version: app.getVersion(), onEvent: scheduleRefresh });
+    asks = lib.createAsks({ onChange: onAsksChange });
+    asks.setUi(prefs.get().showCard !== false);
+    hub = await lib.startHubServer({ version: app.getVersion(), onEvent: scheduleRefresh, asks });
   } catch (e) {
-    hubError = e.code === "EADDRINUSE" ? "Another Jarvis hub is running (jarvis serve?). Hooks still speak through it." : e.message;
+    hubError = e.code === "EADDRINUSE" ? "Another Earpiece hub is running (earpiece serve?). Hooks still speak through it." : e.message;
     lib.log({ error: `app hub: ${e.message}` });
   }
 
   tray = new Tray(trayIcon(false));
-  tray.setToolTip("Jarvis Voice");
+  tray.setToolTip("Earpiece");
   tray.on("click", () => togglePopover());
   tray.on("right-click", () => tray.popUpContextMenu(buildMenu()));
 
@@ -114,7 +144,7 @@ function hookStatus() {
       try {
         text = fs.readFileSync(a.configFile(), "utf8");
       } catch {}
-      const target = text.includes("jarvis-hook") ? "app" : a.isInstalled?.() ? "cli" : null;
+      const target = /(?:earpiece|jarvis)-hook/.test(text) ? "app" : a.isInstalled?.() ? "cli" : null;
       const present = fs.existsSync(path.dirname(a.configFile()));
       return { id: a.id, name: a.name, target, present };
     });
@@ -130,12 +160,19 @@ function state() {
   const cfg = lib.config();
   const rows = lib.listSessions({ sinceMs: DAY }).map((s) => {
     const a = lib.getAdapter(s.agent);
+    const agent = lib.agentConfig(cfg, s.agent).label || a.name;
+    const project = s.project || lib.projectName(s.cwd);
     return {
-      agent: lib.agentConfig(cfg, s.agent).label || a.name,
-      project: s.project || lib.projectName(s.cwd),
+      agent,
+      agentId: s.agent,
+      session: s.session,
+      project,
       status: s.status || "idle",
       updated: s.updated || 0,
-      lastLine: s.lastLine || "",
+      where: s.origin ? lib.describeOrigin(s.origin) : "",
+      // The row already shows the agent and project, so drop them from the spoken line.
+      // Once you mark it done, the old question is stale; say so instead.
+      lastLine: s.status === "done" && s.markedByUser >= (s.updated || 0) - 5 ? "Marked done by you" : lib.stripLeadIn(s.lastLine || "", { agentName: agent, project }),
     };
   });
   const order = { waiting: 0, error: 1, working: 2, done: 3, idle: 4 };
@@ -148,7 +185,7 @@ function state() {
     quietNow: lib.inQuietHours(cfg.quietHours),
     hub: hub ? { ok: true } : { ok: false, error: hubError },
     hooks: hookStatus(),
-    speaking: fs.existsSync(lib.P.lock),
+    speaking: lib.isSpeaking(), // audio is playing, not merely "waiting on the TTS API"
     openAtLogin: app.getLoginItemSettings().openAtLogin,
   };
 }
@@ -164,7 +201,7 @@ function refresh() {
   const s = state();
   const waiting = s.sessions.filter((r) => r.status === "waiting").length;
   tray.setTitle(waiting ? String(waiting) : "", { fontType: "monospacedDigit" });
-  tray.setToolTip(waiting ? `Jarvis Voice: ${waiting} waiting on you` : `Jarvis Voice (${s.mode})`);
+  tray.setToolTip(waiting ? `Earpiece: ${waiting} waiting on you` : `Earpiece (${s.mode})`);
   setSpeaking(s.speaking);
   popover?.webContents.send("state", s);
   win?.webContents.send("state", s);
@@ -190,8 +227,182 @@ function watchState() {
     } catch {}
   }
   // The lock dir appears while a line plays; polling it is cheaper than watching every event.
-  setInterval(() => setSpeaking(fs.existsSync(lib.P.lock)), 400).unref();
+  try {
+    cardMtime = fs.statSync(lib.P.card).mtimeMs; // don't replay the last card from before launch
+  } catch {}
+  setInterval(() => {
+    setSpeaking(lib.isSpeaking());
+    checkCard();
+  }, 250).unref();
   setInterval(refresh, 30_000).unref(); // ages in the popover, mode timers running out
+}
+
+// ---------- floating card ----------
+// A small dark island under the menu bar showing who spoke and what they said. It never takes
+// focus, follows you across Spaces and full-screen apps, and lets clicks through everywhere
+// except the card itself. The core writes card.json (see src/card.mjs); we poll its mtime.
+
+const CARD_W = 480;
+const CARD_H = 104;
+let cardWin = null;
+let cardReady = false;
+let cardPending = null;
+let cardMtime = 0;
+
+function createCardWin() {
+  cardWin = new BrowserWindow({
+    width: CARD_W,
+    height: CARD_H,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    acceptFirstMouse: true,
+    alwaysOnTop: true,
+    webPreferences: webPreferences(),
+  });
+  cardWin.setAlwaysOnTop(true, "status");
+  // skipTransformProcessType keeps the Dock icon; without it macOS turns us into an agent app.
+  cardWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  cardWin.setIgnoreMouseEvents(true, { forward: true });
+  cardWin.loadFile(path.join(APP_ROOT, "renderer", "card.html"));
+  lockDown(cardWin);
+  cardWin.webContents.once("did-finish-load", () => {
+    cardReady = true;
+    if (cardPending) sendCard(cardPending);
+    cardPending = null;
+  });
+  cardWin.on("closed", () => ((cardWin = null), (cardReady = false)));
+}
+
+function placeCard() {
+  const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  cardWin.setBounds({ x: Math.round(workArea.x + (workArea.width - CARD_W) / 2), y: workArea.y + 2, width: CARD_W, height: cardH });
+}
+
+function sendCard(c) {
+  // A question is taller than a line; the card measures itself and reports back ("size").
+  const h = c.ask ? (cardIsAsk ? cardH : ASK_H) : CARD_H;
+  cardIsAsk = Boolean(c.ask);
+  if (!cardWin.isVisible()) {
+    cardH = h;
+    placeCard();
+    cardWin.setIgnoreMouseEvents(true, { forward: true });
+    if (hiddenForFocus) (hiddenForFocus = false, app.show?.());
+    cardWin.showInactive();
+  } else if (cardH !== h) {
+    cardH = h;
+    placeCard();
+  }
+  cardWin.webContents.send("card", c);
+}
+
+function deliverCard(payload) {
+  if (!cardWin) createCardWin();
+  if (!cardReady) cardPending = payload;
+  else sendCard(payload);
+}
+
+function presentCard(c) {
+  if (!c?.line || prefs.get().showCard === false) return;
+  // A question is on screen: keep it there. The line is still spoken, just not shown over it.
+  if (asks?.size()) return;
+  const a = c.agent ? lib.getAdapter(c.agent) : null;
+  const agentName = c.agent ? lib.agentConfig(lib.config(), c.agent).label || a?.name || c.agent : "Earpiece";
+  deliverCard(lib.cardPayload(c, { agentName, project: c.project }));
+}
+
+// ---------- answering from the card ----------
+// A blocking hook (see src/hub/asks.mjs) is waiting for you. The oldest question is on the card;
+// the rest queue behind it ("+N more"). Nothing is approved unless you click a button.
+
+const ASK_H = 230;
+let cardH = CARD_H;
+let cardIsAsk = false;
+let hiddenForFocus = false;
+let lastAnswer = null; // what the card just sent, so onAsksChange can show a one-line confirmation
+
+function agentLabel(id) {
+  const a = id ? lib.getAdapter(id) : null;
+  return id ? lib.agentConfig(lib.config(), id).label || a?.name || id : "Earpiece";
+}
+
+const ARM_MS = 700; // the renderer disables the buttons for this long; the app enforces it too
+let shown = { id: null, at: 0 };
+
+function askPayload(list) {
+  const a = list[0];
+  if (shown.id !== a.id) shown = { id: a.id, at: Date.now() };
+  return {
+    id: a.id,
+    line: a.line,
+    kind: "needs_input",
+    state: "ask",
+    agentId: a.agent,
+    agentName: agentLabel(a.agent),
+    project: a.project || null,
+    more: list.length - 1,
+    at: a.at,
+    ask: { id: a.id, kind: a.kind, tool: a.tool || null, detail: a.detail || "", why: a.why || "", canAlways: Boolean(a.canAlways), alwaysRule: a.alwaysRule || "", partial: Boolean(a.partial), expiresAt: a.expiresAt },
+  };
+}
+
+function confirmText(ask, answer) {
+  if (ask.kind !== "permission") return "Reply sent";
+  const what = ask.tool || "request";
+  if (answer.behavior === "deny") return `Denied ${what}`;
+  return answer.behavior === "always" ? `Always allowed ${what}` : `Allowed ${what}`;
+}
+
+function onAsksChange(list, change) {
+  if (prefs.get().showCard === false) return;
+  if (list.length) return deliverCard(askPayload(list));
+  // The last question just closed.
+  releaseCardFocus();
+  if (change.type === "answered" && lastAnswer) {
+    const { ask, answer } = lastAnswer;
+    return deliverCard({ id: `ok-${ask.id}`, line: confirmText(ask, answer), kind: "done", state: "spoken", agentId: ask.agent, agentName: agentLabel(ask.agent), project: ask.project || null, brief: true });
+  }
+  cardPending = null;
+  if (cardWin?.isVisible()) cardWin.webContents.send("card", { state: "clear" });
+}
+
+// The reply box needs the keyboard, so the card becomes focusable only while you type in it.
+function grabCardFocus() {
+  if (!cardWin) return;
+  cardWin.setFocusable(true);
+  cardWin.focus();
+}
+
+function releaseCardFocus() {
+  if (!cardWin || cardWin.isFocusable() === false) return;
+  cardWin.setFocusable(false);
+  // Give the keyboard back to the terminal: hide the app, unless a window of ours is open or a
+  // question is still waiting (hiding the app would hide its card too).
+  if (process.platform === "darwin" && !asks?.size() && !win?.isVisible() && !popover?.isVisible()) {
+    hiddenForFocus = true;
+    app.hide();
+  }
+}
+
+function checkCard() {
+  let st;
+  try {
+    st = fs.statSync(lib.P.card);
+  } catch {
+    return;
+  }
+  if (st.mtimeMs === cardMtime) return;
+  cardMtime = st.mtimeMs;
+  const c = lib.readJson(lib.P.card, null);
+  if (c && Date.now() - (c.at || 0) < 30_000) presentCard(c);
 }
 
 // ---------- actions ----------
@@ -208,7 +419,7 @@ function connectAgents(only) {
     if (!a.install || (only && a.id !== only)) continue;
     try {
       // chain: keep any existing Codex notify command and forward to it.
-      lines.push(...a.install({ cmd: [lib.shimFile], chain: true }));
+      lines.push(...a.install({ cmd: [lib.shimFile], chain: true, ask: lib.config().answerFromCard === true }));
     } catch (e) {
       lines.push(`✗ ${a.name}: ${e.message}`);
     }
@@ -249,7 +460,7 @@ async function testVoice() {
 function buildMenu() {
   const { mode } = modeInfo();
   return Menu.buildFromTemplate([
-    { label: "Open Jarvis Voice", click: () => showMain() },
+    { label: "Open Earpiece", click: () => showMain() },
     { type: "separator" },
     { label: "On", type: "radio", checked: mode === "on", click: () => setMode("on") },
     { label: "Quiet for 1 hour", sublabel: "only “needs you” pings", type: "radio", checked: mode === "quiet", click: () => setMode("quiet", 60) },
@@ -262,8 +473,8 @@ function buildMenu() {
     { label: "Settings…", click: () => showMain("voice") },
     { label: "Activity", click: () => showMain("activity") },
     { type: "separator" },
-    { label: `Jarvis Voice ${app.getVersion()}`, enabled: false },
-    { label: "Quit Jarvis Voice", accelerator: "Cmd+Q", click: () => app.quit() },
+    { label: `Earpiece ${app.getVersion()}`, enabled: false },
+    { label: "Quit Earpiece", accelerator: "Cmd+Q", click: () => app.quit() },
   ]);
 }
 
@@ -333,7 +544,7 @@ function createMain() {
     minWidth: 820,
     minHeight: 540,
     show: false,
-    title: "Jarvis Voice",
+    title: "Earpiece",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 18, y: 20 },
     vibrancy: "sidebar",
@@ -343,7 +554,7 @@ function createMain() {
   });
   win.loadFile(path.join(APP_ROOT, "renderer", "app.html"));
   lockDown(win);
-  // Closing the window keeps Jarvis running in the menu bar; ⌘Q quits.
+  // Closing the window keeps Earpiece running in the menu bar; ⌘Q quits.
   win.on("close", (e) => {
     if (quitting) return;
     e.preventDefault();
@@ -412,7 +623,7 @@ function appMenu() {
     { role: "windowMenu" },
     {
       role: "help",
-      submenu: [{ label: "Jarvis Voice on GitHub", click: () => shell.openExternal("https://github.com/AdityaVernekar/jarvis-voice") }],
+      submenu: [{ label: "Earpiece on GitHub", click: () => shell.openExternal("https://github.com/adissocrazy/earpiece") }],
     },
   ]);
 }
@@ -421,6 +632,60 @@ function appMenu() {
 // The renderers get these and nothing else (see preload.cjs). Arguments are checked here.
 
 ipcMain.handle("state", () => state());
+// Mark a session done (or idle), or forget it. Only sessions that exist can be touched.
+ipcMain.handle("session", (_e, action, agent, session) => {
+  const a = String(agent || "");
+  const id = String(session || "");
+  if (!lib.getSession(a, id)) return { ok: false, error: "That session is gone." };
+  try {
+    if (action === "done") lib.setSessionStatus(a, id, "done");
+    else if (action === "forget") lib.forgetSession(a, id);
+    else return { ok: false, error: "unknown action" };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+  refresh();
+  return { ok: true };
+});
+ipcMain.handle("card", (e, action, value) => {
+  if (!cardWin || e.sender !== cardWin.webContents) return;
+  if (action === "hidden") {
+    if (asks?.size()) return; // a stale "hidden" from a card that was replaced by a question
+    cardWin.hide();
+    releaseCardFocus();
+  }
+  else if (action === "hover") cardWin.setIgnoreMouseEvents(!value, { forward: true });
+  else if (action === "stop") (lib.stopSpeaking(), refresh());
+  else if (action === "open") showMain("overview");
+  else if (action === "focus") (value ? grabCardFocus() : releaseCardFocus());
+  else if (action === "size") {
+    const h = Math.min(Math.max(Math.round(Number(value)) || CARD_H, CARD_H), 460);
+    if (cardIsAsk && h !== cardH) ((cardH = h), cardWin.isVisible() && placeCard());
+  } else if (action === "defer") asks?.cancel(String(value), "deferred"); // "answer in the terminal instead"
+});
+// The card's answer to a question. Only the card window may send it, and the shape is checked
+// again in asks.answer() (unknown id, "always" when it isn't offered, empty reply).
+ipcMain.handle("ask-answer", (e, id, answer) => {
+  if (!cardWin || e.sender !== cardWin.webContents || !asks) return { ok: false, error: "not available" };
+  const ask = asks.get(String(id));
+  if (!ask) return { ok: false, error: "That question is gone." };
+  // Only the question on screen, and only once it has been there a moment, can be answered.
+  if (shown.id !== ask.id || Date.now() - shown.at < ARM_MS) return { ok: false, error: "Wait a moment, then try again." };
+  const given = answer && typeof answer === "object" ? answer : {};
+  // asks.answer() calls onAsksChange before it returns; that is where the confirmation is shown.
+  lastAnswer = { ask, answer: { behavior: String(given.behavior || "") } };
+  try {
+    asks.answer(ask.id, given);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  } finally {
+    lastAnswer = null;
+  }
+});
+ipcMain.handle("card-preview", () =>
+  presentCard({ id: `preview-${Date.now()}`, line: "Codex, shop. Fixed the checkout bug and all tests pass.", kind: "done", state: "spoken", agent: "codex", project: "shop" }),
+);
 ipcMain.handle("set-mode", (_e, mode, minutes) => {
   if (!["on", "quiet", "off"].includes(mode)) return;
   setMode(mode, Math.min(Math.max(Number(minutes) || 0, 0), 24 * 60));

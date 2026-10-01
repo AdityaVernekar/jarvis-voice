@@ -9,7 +9,7 @@
 //     forward?(raw)                         pass the raw payload on to a chained command
 //   }
 //
-// Agents without an adapter can still talk to the hub with `jarvis emit --agent <id> …`.
+// Agents without an adapter can still talk to the hub with `earpiece emit --agent <id> …`.
 // See docs/adapters.md.
 import claudeCode from "./claude-code.mjs";
 import claudeDesktop from "./claude-desktop.mjs";
@@ -24,7 +24,7 @@ export function registerAdapter(a) {
 
 const titleCase = (id) => String(id).replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-// Unknown ids get a pass-through adapter, so `jarvis emit --agent aider` works with no code.
+// Unknown ids get a pass-through adapter, so `earpiece emit --agent aider` works with no code.
 export function getAdapter(id) {
   return (
     ADAPTERS.get(id) || {

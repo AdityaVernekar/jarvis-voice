@@ -43,7 +43,7 @@ export const PHRASES = {
     runOk: (p, l) => `${p}. ${l} finished.`,
     runFail: (p, l) => `${p}. ${l} failed.`,
     failed: (p) => `${p} hit an error.`,
-    test: "Jarvis online. You'll hear from me when your agents finish or need you.",
+    test: "Earpiece is on. You'll hear from me when your agents finish or need you.",
   },
   hinglish: {
     waiting: (p) => `${p} आपका wait कर रहा है।`,
@@ -52,7 +52,7 @@ export const PHRASES = {
     runOk: (p, l) => `${p}. ${l} finish हो गया।`,
     runFail: (p, l) => `${p}. ${l} fail हो गया।`,
     failed: (p) => `${p} में error आया है।`,
-    test: "Jarvis online है। जब भी आपके agents का काम पूरा होगा या उन्हें आपकी ज़रूरत होगी, मैं बता दूँगी।",
+    test: "Earpiece on है। जब भी आपके agents का काम पूरा होगा या उन्हें आपकी ज़रूरत होगी, मैं बता दूँगी।",
   },
   hi: {
     waiting: (p) => `${p} आपका इंतज़ार कर रहा है।`,

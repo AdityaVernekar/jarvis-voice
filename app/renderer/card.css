@@ -1,0 +1,105 @@
+/* The floating card: a dark island just under the menu bar, the same in light and dark mode. */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+body {
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  color: #f5f5f7; -webkit-user-select: none; user-select: none; cursor: default;
+  display: flex; justify-content: center; align-items: flex-start; padding: 6px 14px 22px;
+}
+.card {
+  --accent: #4c8dff;
+  pointer-events: auto; width: 100%; display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px 10px 10px; border-radius: 22px; background: rgba(14, 14, 16, 0.94);
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 10px 30px rgba(0, 0, 0, 0.35);
+  transform-origin: 50% 0; opacity: 0; transform: translateY(-10px) scale(0.72, 0.6);
+  transition: opacity 0.22s ease, transform 0.34s cubic-bezier(0.2, 0.9, 0.25, 1.15);
+}
+.card.in { opacity: 1; transform: none; }
+.card.out { opacity: 0; transform: translateY(-8px) scale(0.85, 0.7); transition-duration: 0.2s, 0.24s; transition-timing-function: ease-in; }
+.card.needs_input { --accent: #ffb020; }
+.card.error { --accent: #ff5a4e; }
+.card.done { --accent: #3ccf73; }
+.card.silent { --accent: #8e8e93; }
+
+.avatar {
+  position: relative; width: 38px; height: 38px; flex: none; border-radius: 50%;
+  display: grid; place-items: center; background: #26262a; color: #f5f5f7;
+}
+.avatar .logo { width: 20px; height: 20px; position: relative; z-index: 1; }
+.ring { position: absolute; inset: -3px; border-radius: 50%; box-shadow: 0 0 0 2px var(--accent); opacity: 0.9; }
+.card.speaking .ring { animation: ring 1.4s ease-out infinite; }
+@keyframes ring { 0% { transform: scale(0.94); opacity: 0.95; } 100% { transform: scale(1.22); opacity: 0; } }
+
+.text { flex: 1; min-width: 0; }
+.meta { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #a1a1a6; white-space: nowrap; overflow: hidden; }
+.meta b { color: #f5f5f7; font-weight: 600; }
+.meta #project:not(:empty)::before { content: "·"; margin-right: 6px; }
+#project { overflow: hidden; text-overflow: ellipsis; }
+.chip { font-size: 10.5px; padding: 0 6px; border-radius: 8px; background: rgba(255, 255, 255, 0.1); color: #c7c7cc; flex: none; }
+.line {
+  margin: 2px 0 0; font-size: 13.5px; line-height: 1.35; color: #f5f5f7;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.card.silent .line { color: #d1d1d6; }
+
+.side { display: flex; align-items: center; gap: 6px; flex: none; }
+.wave { display: inline-flex; align-items: center; gap: 2px; height: 16px; margin-right: 2px; }
+.wave i { width: 2.5px; height: 30%; border-radius: 2px; background: var(--accent); opacity: 0.5; }
+.card.speaking .wave i { opacity: 1; animation: bounce 0.9s ease-in-out infinite; }
+.wave i:nth-child(2), .wave i:nth-child(4) { height: 60%; }
+.wave i:nth-child(3) { height: 100%; }
+.card.speaking .wave i:nth-child(2) { animation-delay: 0.1s; }
+.card.speaking .wave i:nth-child(3) { animation-delay: 0.2s; }
+.card.speaking .wave i:nth-child(4) { animation-delay: 0.3s; }
+.card.speaking .wave i:nth-child(5) { animation-delay: 0.4s; }
+.card:not(.speaking) .wave { display: none; }
+@keyframes bounce { 50% { transform: scaleY(0.35); } }
+
+.btn { width: 22px; height: 22px; border: 0; border-radius: 50%; padding: 0; background: rgba(255, 255, 255, 0.1); color: #f5f5f7; display: grid; place-items: center; opacity: 0; transition: opacity 0.15s; }
+.btn svg { width: 10px; height: 10px; fill: currentColor; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.btn:hover { background: rgba(255, 255, 255, 0.2); }
+.card:hover .btn { opacity: 1; }
+.card:not(.speaking) #stop { display: none; }
+.card:hover { background: rgba(22, 22, 26, 0.96); }
+
+/* ----- a question the agent is waiting on ----- */
+.card.asking { flex-wrap: wrap; align-content: flex-start; row-gap: 10px; }
+.card.asking .line { -webkit-line-clamp: 4; }
+.card.asking #stop { display: none; }
+.card.asking .btn { opacity: 1; }
+.ask { flex-basis: 100%; min-width: 0; padding: 0 2px 2px; display: flex; flex-direction: column; gap: 8px; }
+.ask[hidden], .ask [hidden] { display: none; }
+.detail {
+  margin: 0; max-height: 86px; overflow: auto; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.07);
+  font: 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e5e5ea; white-space: pre-wrap; word-break: break-all;
+  -webkit-user-select: text; user-select: text;
+}
+.why { margin: 0; font-size: 11.5px; color: #a1a1a6; }
+.err { margin: 0; font-size: 11.5px; color: #ff8a80; }
+.choices, .reply .row { display: flex; gap: 8px; }
+.reply .row { justify-content: flex-end; }
+.act {
+  border: 0; border-radius: 10px; padding: 6px 14px; font: inherit; font-weight: 600; color: #f5f5f7;
+  background: rgba(255, 255, 255, 0.12); transition: background 0.12s, opacity 0.15s;
+}
+.act:hover:not(:disabled) { background: rgba(255, 255, 255, 0.22); }
+.act:disabled { opacity: 0.4; }
+.act.allow { background: #2f9e5b; }
+.act.allow:hover:not(:disabled) { background: #38b56a; }
+.act.deny { background: #b8443b; }
+.act.deny:hover:not(:disabled) { background: #d04f45; }
+.act.terminal { margin-left: auto; font-weight: 500; color: #c7c7cc; background: transparent; }
+.reply .row .terminal { margin-left: 0; margin-right: auto; }
+.reply textarea {
+  width: 100%; resize: none; border: 0; border-radius: 10px; padding: 8px 10px; background: rgba(255, 255, 255, 0.09);
+  color: #f5f5f7; font: inherit; outline: 1px solid rgba(255, 255, 255, 0.14);
+  -webkit-user-select: text; user-select: text; cursor: text;
+}
+.reply textarea:focus { outline-color: var(--accent); }
+.timer { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.timer i { display: block; height: 100%; background: var(--accent); transform-origin: 0 50%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .card, .card.out { transition: opacity 0.15s; transform: none; }
+  .card.speaking .ring, .card.speaking .wave i { animation: none; }
+}
