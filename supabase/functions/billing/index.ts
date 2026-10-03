@@ -6,11 +6,15 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-const DODO = Deno.env.get("DODO_ENV") === "live" ? "https://live.dodopayments.com" : "https://test.dodopayments.com";
-// Earpiece Pro products (Earpiece brand). Test-mode ids by default; set DODO_PRODUCT_MONTH / _YEAR for live.
+// Secrets are trimmed: a pasted trailing space or quotes shouldn't silently switch modes or break the key.
+const env = (name: string) => (Deno.env.get(name) || "").trim().replace(/^["']|["']$/g, "");
+const DODO = env("DODO_ENV").toLowerCase() === "live" ? "https://live.dodopayments.com" : "https://test.dodopayments.com";
+const API_KEY = env("DODO_API_KEY").replace(/^Bearer\s+/i, "");
+// Earpiece Pro products (Earpiece brand in Dodo), per mode. Not secret; DODO_PRODUCT_MONTH / _YEAR override.
+const LIVE = DODO.includes("live.");
 const PRODUCTS: Record<string, string> = {
-  month: Deno.env.get("DODO_PRODUCT_MONTH") || "pdt_0NowseZLebYL9xfZ7e6RC",
-  year: Deno.env.get("DODO_PRODUCT_YEAR") || "pdt_0NowsebJJIuoHy8MRWTIt",
+  month: env("DODO_PRODUCT_MONTH") || (LIVE ? "pdt_0Nox7nghhsoBXPYpVE3cy" : "pdt_0NowseZLebYL9xfZ7e6RC"),
+  year: env("DODO_PRODUCT_YEAR") || (LIVE ? "pdt_0Nox7nhuXf5QMA425MfjH" : "pdt_0NowsebJJIuoHy8MRWTIt"),
 };
 const RETURN_URL = "https://earpiece.dev/?pro=thanks";
 
@@ -21,11 +25,11 @@ async function dodo(path: string, body: unknown) {
   const res = await fetch(`${DODO}${path}`, {
     method: "POST",
     signal: AbortSignal.timeout(15000),
-    headers: { Authorization: `Bearer ${Deno.env.get("DODO_API_KEY")}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`dodo ${path} HTTP ${res.status}: ${JSON.stringify(j).slice(0, 200)}`);
+  if (!res.ok) throw new Error(`dodo ${DODO} ${path} HTTP ${res.status} (key ${API_KEY.length} chars): ${JSON.stringify(j).slice(0, 200)}`);
   return j;
 }
 

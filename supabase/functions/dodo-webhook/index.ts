@@ -8,8 +8,13 @@ import { Webhook } from "npm:standardwebhooks@1.0.0";
 
 const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const GRACE_MS = 2 * 24 * 3600_000; // a renewal webhook that arrives a little late doesn't cut access
-// Earpiece Pro products (test-mode ids by default; set DODO_PRODUCT_MONTH / _YEAR for live).
-const PRO_PRODUCTS = [Deno.env.get("DODO_PRODUCT_MONTH") || "pdt_0NowseZLebYL9xfZ7e6RC", Deno.env.get("DODO_PRODUCT_YEAR") || "pdt_0NowsebJJIuoHy8MRWTIt"];
+// Earpiece Pro products, live and test (ids aren't secret; DODO_PRODUCT_MONTH / _YEAR add to them).
+const env = (name: string) => (Deno.env.get(name) || "").trim().replace(/^["']|["']$/g, "");
+const PRO_PRODUCTS = [
+  "pdt_0Nox7nghhsoBXPYpVE3cy", "pdt_0Nox7nhuXf5QMA425MfjH", // live
+  "pdt_0NowseZLebYL9xfZ7e6RC", "pdt_0NowsebJJIuoHy8MRWTIt", // test
+  env("DODO_PRODUCT_MONTH"), env("DODO_PRODUCT_YEAR"),
+].filter(Boolean);
 
 const ok = () => new Response(JSON.stringify({ received: true }), { headers: { "Content-Type": "application/json" } });
 const plus = (iso: string | null | undefined, ms: number) => (iso ? new Date(Date.parse(iso) + ms).toISOString() : null);
@@ -19,7 +24,7 @@ Deno.serve(async (req) => {
   const raw = await req.text();
   let event: { type: string; timestamp: string; data: Record<string, any> };
   try {
-    event = new Webhook(Deno.env.get("DODO_WEBHOOK_SECRET")!).verify(raw, {
+    event = new Webhook(env("DODO_WEBHOOK_SECRET")).verify(raw, {
       "webhook-id": req.headers.get("webhook-id") || "",
       "webhook-signature": req.headers.get("webhook-signature") || "",
       "webhook-timestamp": req.headers.get("webhook-timestamp") || "",
