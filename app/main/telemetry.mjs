@@ -2,8 +2,8 @@
 // times a day the app sends exactly what payload() returns: a random install id, the app and
 // macOS versions, the CPU architecture, the locale, which agents are connected, and the feature
 // settings and counts listed in features(). Never code, prompts, summaries, project names, paths
-// or API keys. Anonymous unless you sign in, then linked to your account. Off with the General
-// switch, or EARPIECE_TELEMETRY=0.
+// or API keys. Anonymous unless you sign in, then linked to your account. Signed out: off with the
+// General switch. Signed in: always on (signing out stops it). EARPIECE_TELEMETRY=0 always wins.
 //
 // No Electron imports here: main.mjs passes in what it needs, so the logic can be tested in Node.
 import crypto from "node:crypto";
@@ -17,7 +17,7 @@ const FIRST_PING_MS = 30_000;
 // The row for today is updated in place, so the last ping of the day carries the day's counts.
 const PING_EVERY_MS = 6 * 3600_000;
 
-export const enabled = (shareStats, env = process.env) => shareStats !== false && env.EARPIECE_TELEMETRY !== "0";
+export const enabled = (shareStats, env = process.env, signedIn = false) => env.EARPIECE_TELEMETRY !== "0" && (signedIn || shareStats !== false);
 
 const num = (n) => (Number.isFinite(n) ? n : 0);
 const word = (s) => (typeof s === "string" && /^[\w.-]{1,24}$/.test(s) ? s : null);
@@ -57,11 +57,11 @@ export const payload = ({ installId, version, osVersion, arch, locale, agents, f
 export function createTelemetry({ getPrefs, saveInstallId, info, accessToken = async () => null, fetch = globalThis.fetch }) {
   async function ping() {
     const p = getPrefs();
-    if (!enabled(p.shareStats)) return false;
+    const token = await accessToken().catch(() => null);
+    if (!enabled(p.shareStats, process.env, Boolean(token))) return false;
     let installId = p.installId;
     if (!installId) saveInstallId((installId = crypto.randomUUID()));
     try {
-      const token = await accessToken().catch(() => null);
       const res = await fetch(ENDPOINT, {
         method: "POST",
         headers: { apikey: KEY, "Content-Type": "application/json", ...(token && { Authorization: `Bearer ${token}` }) },

@@ -92,6 +92,14 @@ test("opted out: nothing is sent and no id is made", async () => {
   assert.equal(enabled(undefined, {}), true);
 });
 
+test("signed in: stats are sent even with the switch off; EARPIECE_TELEMETRY=0 still wins", async () => {
+  const { t, calls } = setup({ shareStats: false, installId: "11111111-1111-4111-8111-111111111111" }, { token: "user-jwt" });
+  assert.equal(await t.ping(), true);
+  assert.equal(calls[0].opts.headers.Authorization, "Bearer user-jwt");
+  assert.equal(enabled(false, {}, true), true);
+  assert.equal(enabled(false, { EARPIECE_TELEMETRY: "0" }, true), false);
+});
+
 test("network failures and same-day repeats (409) are swallowed", async () => {
   assert.equal(await setup({}, { fail: true }).t.ping(), false);
   assert.equal(await setup({}, { ok: false }).t.ping(), false);

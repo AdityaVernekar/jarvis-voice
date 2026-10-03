@@ -866,6 +866,7 @@ function welcome() {
       h("button", { class: "google", onclick: start }, googleMark(), signingIn ? "Open Google again" : "Continue with Google"),
       signingIn ? h("p", { class: "note" }, "Finish signing in in your browser, then come back here.") : null,
       err ? h("p", { class: "note err" }, `Sign-in didn't finish: ${err}`) : null,
+      h("p", { class: "note fine" }, "Signing in shares usage stats with your account. Never your prompts or code."),
       h("button", { class: "skip", onclick: () => ((signingIn = false), setPref("hideSignInNudge", true)) }, "Skip for now"),
     ),
   );
@@ -920,10 +921,19 @@ function general() {
         "Approve or deny Claude Code and Codex tool requests, and reply when they ask you something, right from the card. Needs the card on. Restart open sessions after changing it; in Codex, trust the new hooks once with /hooks. If you don't answer in about two minutes, the question goes back to the terminal.",
         sw(P.answerFromCard && P.showCard, (v) => setPref("answerFromCard", v), "Answer from the card"),
       ),
+      D.account?.user
+        ? row(
+            "Usage stats",
+            "Shared with your account while you're signed in: the app and macOS versions, which agents are connected, which features are on and how many lines were spoken today. Sign out to stop.",
+          )
+        : row(
+            "Share usage stats",
+            "A few times a day, anonymously: the app and macOS versions, your Mac's chip type, language, which agents are connected, which features are on and how many lines were spoken today.",
+            sw(P.shareStats, (v) => setPref("shareStats", v), "Share usage stats"),
+          ),
       row(
-        "Share usage stats",
-        "A few times a day: a random install id, the app and macOS versions, your Mac's chip type, language, which agents are connected, which features are on and how many lines were spoken today. Never your code, prompts, summaries, project names, paths or keys. Anonymous unless you sign in.",
-        sw(P.shareStats, (v) => setPref("shareStats", v), "Share usage stats"),
+        "Your work stays on your Mac",
+        "We never collect your prompts, code, agent messages, summaries, project names, file paths or API keys. Settings and logs stay local in ~/.earpiece. The only exception is a voice or summary provider you add your own key for, which gets just the text it needs to speak a line.",
       ),
     ),
     h("h2", {}, "Files"),

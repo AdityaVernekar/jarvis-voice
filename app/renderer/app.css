@@ -241,6 +241,7 @@ input[type="range"] { width: 140px; accent-color: var(--blue); }
 .welcome p { margin: 0 0 26px; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .welcome p.note { margin: 12px 0 0; font-size: 12px; }
 .welcome p.err { color: var(--red); }
+.welcome p.fine { margin-top: 14px; color: var(--faint); font-size: 11.5px; }
 button.google { display: inline-flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 40px; border: 1px solid #dadce0; border-radius: 8px; background: #fff; color: #1f1f1f; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
 button.google svg { width: 18px; height: 18px; flex: none; }
 button.google:active { filter: brightness(0.95); }
