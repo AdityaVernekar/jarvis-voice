@@ -211,6 +211,13 @@ function overview() {
   const s = D.stats;
   const parts = [
     updateBanner("overview"),
+    !D.account?.user && !D.prefs?.hideSignInNudge
+      ? h(
+          "div",
+          { class: "group" },
+          row("Sign in to hear about new features", "Optional, with Google. Earpiece works the same without it.", btn("Sign in", () => act("signIn"), "primary"), btn("Not now", () => setPref("hideSignInNudge", true))),
+        )
+      : null,
     h(
       "div",
       { class: "group" },
@@ -817,9 +824,29 @@ async function setPref(key, value) {
   await reload().catch(() => {});
   render();
 }
+function account() {
+  const A = D.account || {};
+  const u = A.user;
+  return [
+    h("h2", {}, "Account"),
+    h(
+      "div",
+      { class: "group" },
+      u
+        ? row(u.name || u.email, u.name ? u.email : "Signed in with Google", btn("Sign out", () => act("signOut").then(() => setPref("hideSignInNudge", true))))
+        : row(
+            "Sign in with Google",
+            A.error ? `Sign-in didn't finish: ${A.error}` : "Optional. Everything works without an account. Signing in links your usage stats to you, so we know who uses Earpiece and can tell you about new features.",
+            btn("Sign in", () => act("signIn"), "primary"),
+          ),
+    ),
+  ];
+}
+
 function general() {
   const P = D.prefs;
   return [
+    ...account(),
     h("h2", {}, "App"),
     h(
       "div",
@@ -847,9 +874,9 @@ function general() {
         sw(P.answerFromCard && P.showCard, (v) => setPref("answerFromCard", v), "Answer from the card"),
       ),
       row(
-        "Share anonymous usage stats",
-        "A few times a day: a random install id, the app and macOS versions, your Mac's chip type, language, and which agents are connected. Never your code, prompts, summaries, project names or paths. It tells us how many people use Earpiece.",
-        sw(P.shareStats, (v) => setPref("shareStats", v), "Share anonymous usage stats"),
+        "Share usage stats",
+        "A few times a day: a random install id, the app and macOS versions, your Mac's chip type, language, which agents are connected, which features are on and how many lines were spoken today. Never your code, prompts, summaries, project names, paths or keys. Anonymous unless you sign in.",
+        sw(P.shareStats, (v) => setPref("shareStats", v), "Share usage stats"),
       ),
     ),
     h("h2", {}, "Files"),
@@ -954,7 +981,7 @@ J.onState((s) => {
 });
 J.onNavigate((s) => go(s || "overview"));
 window.addEventListener("focus", () => {
-  if (section === "overview") reload().then(render).catch(() => {});
+  if (section === "overview" || section === "general") reload().then(render).catch(() => {});
 });
 
 reload()

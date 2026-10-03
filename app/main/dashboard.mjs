@@ -123,7 +123,7 @@ export function friendlyLog(lines, redact = (s) => s) {
 
 // ---------- dashboard ----------
 
-export function createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect, disconnect, refresh, prefs, updater }) {
+export function createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect, disconnect, refresh, prefs, updater, auth, account }) {
   const voiceCache = new Map();
   let sayVoices = null;
 
@@ -217,7 +217,8 @@ export function createDashboard({ app, dialog, shell, lib, core, state, hookStat
       agents: agents(),
       keys: keyStatus(),
       stats: stats(),
-      prefs: { showInDock: prefs.get().showInDock !== false, showCard: prefs.get().showCard !== false, notch: prefs.get().notch || "auto", notchIcon: prefs.get().notchIcon === "updates" ? "updates" : "always", answerFromCard: lib.config().answerFromCard === true, shareStats: prefs.get().shareStats !== false, openAtLogin: app.getLoginItemSettings().openAtLogin },
+      account: account(),
+      prefs: { showInDock: prefs.get().showInDock !== false, showCard: prefs.get().showCard !== false, notch: prefs.get().notch || "auto", notchIcon: prefs.get().notchIcon === "updates" ? "updates" : "always", answerFromCard: lib.config().answerFromCard === true, shareStats: prefs.get().shareStats !== false, hideSignInNudge: prefs.get().hideSignInNudge === true, openAtLogin: app.getLoginItemSettings().openAtLogin },
       engines: listEngines().map((e) => ({ id: e.id, label: e.label || e.id, keyName: e.keyName || null })),
       languages: [["en", "English"], ["hinglish", "Hinglish"], ...Object.entries(LANG_NAMES)],
       openaiVoices: OPENAI_VOICES,
@@ -471,6 +472,10 @@ export function createDashboard({ app, dialog, shell, lib, core, state, hookStat
         lib.updateConfig({ envFile: null });
         voiceCache.clear();
         return keyStatus();
+      case "signIn":
+        return auth.signIn();
+      case "signOut":
+        return auth.signOut();
       case "setPref":
         return prefs.set(a.key, a.value);
       case "checkUpdate":
@@ -492,5 +497,5 @@ export function createDashboard({ app, dialog, shell, lib, core, state, hookStat
     }
   }
 
-  return { action, data };
+  return { action, data, keyStatus, stats };
 }

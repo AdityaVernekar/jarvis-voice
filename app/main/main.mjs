@@ -2,14 +2,15 @@
 // bar popover for quick control. Hooks send events to ~/.earpiece/hub.sock through the earpiece-hook shim; this process
 // summarises and speaks them. The Node core in ../../src (Resources/core when packaged) does
 // the work, so the app and the `earpiece` CLI always behave the same.
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, shell, Tray } from "electron";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createDashboard, tidyPath } from "./dashboard.mjs";
 import { createUpdater } from "./updater.mjs";
-import { createTelemetry } from "./telemetry.mjs";
+import { createAuth } from "./auth.mjs";
+import { createTelemetry, features } from "./telemetry.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(here, "..");
@@ -18,7 +19,7 @@ const asset = (f) => path.join(APP_ROOT, "build", f);
 const core = (rel) => import(pathToFileURL(path.join(CORE, rel)).href);
 
 const DAY = 24 * 3600_000;
-let tray, popover, win, hub, dash, updater, asks = null, hubError = null;
+let tray, popover, win, hub, dash, updater, telemetry, asks = null, hubError = null, authError = null;
 let quitting = false;
 let lib = {};
 const SECTIONS = ["overview", "agents", "voice", "quiet", "keys", "activity", "general"];
@@ -64,13 +65,21 @@ const prefs = {
       applyRest();
       return next;
     }
+    if (key === "session") {
+      // Already encrypted by the caller (see auth below); null signs out.
+      const { session: _, ...next } = this.get();
+      if (value) next.session = String(value);
+      fs.mkdirSync(path.dirname(this.file()), { recursive: true });
+      fs.writeFileSync(this.file(), JSON.stringify(next, null, 2));
+      return next;
+    }
     if (key === "installId") {
       const next = { ...this.get(), installId: String(value) };
       fs.mkdirSync(path.dirname(this.file()), { recursive: true });
       fs.writeFileSync(this.file(), JSON.stringify(next, null, 2));
       return next;
     }
-    if (key !== "showInDock" && key !== "showCard" && key !== "shareStats") throw new Error("unknown preference");
+    if (!["showInDock", "showCard", "shareStats", "hideSignInNudge"].includes(key)) throw new Error("unknown preference");
     const next = { ...this.get(), [key]: Boolean(value) };
     fs.mkdirSync(path.dirname(this.file()), { recursive: true });
     fs.writeFileSync(this.file(), JSON.stringify(next, null, 2));
@@ -84,6 +93,35 @@ const prefs = {
   },
 };
 
+// Optional Google sign-in. The session is encrypted with safeStorage (the macOS Keychain) before it
+// is written to prefs.json.
+const auth = createAuth({
+  load() {
+    const s = prefs.get().session;
+    if (!s || !safeStorage.isEncryptionAvailable()) return null;
+    try {
+      return JSON.parse(safeStorage.decryptString(Buffer.from(s, "base64")));
+    } catch {
+      return null;
+    }
+  },
+  save: (session) => prefs.set("session", session && safeStorage.encryptString(JSON.stringify(session)).toString("base64")),
+  openExternal: (url) => shell.openExternal(url),
+});
+const account = () => ({ user: auth.user(), error: authError });
+
+// The browser hands the sign-in back as earpiece://auth?code=….
+async function onAuthLink(url) {
+  authError = null;
+  try {
+    if (await auth.handleCallback(url)) telemetry?.ping();
+  } catch (e) {
+    authError = e.message;
+    lib.log?.({ warn: `sign-in: ${e.message}` });
+  }
+  if (app.isReady() && lib.log) (showMain("general"), refresh());
+}
+
 function applyDock(show) {
   if (!app.dock) return;
   if (show) app.dock.show().then(() => win?.isVisible() && win.focus());
@@ -94,6 +132,8 @@ function applyDock(show) {
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on("second-instance", () => showMain());
+  app.setAsDefaultProtocolClient("earpiece");
+  app.on("open-url", (e, url) => (e.preventDefault(), onAuthLink(url)));
   app.whenReady().then(start).catch((e) => {
     dialog.showErrorBox("Earpiece could not start", String(e?.stack || e));
     app.quit();
@@ -165,7 +205,7 @@ async function start() {
     quit: () => app.quit(),
     onChange: scheduleRefresh,
   });
-  dash = createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect: connectAgents, disconnect: disconnectAgents, refresh, prefs, updater });
+  dash = createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect: connectAgents, disconnect: disconnectAgents, refresh, prefs, updater, auth, account });
   Menu.setApplicationMenu(appMenu());
   noteDisplays();
   for (const ev of ["display-added", "display-removed", "display-metrics-changed"]) screen.on(ev, onDisplaysChanged);
@@ -174,18 +214,22 @@ async function start() {
   applyRest(); // the resting icon in the notch, unless you turned it off
   updater.start(); // a few seconds after launch, then every 6 hours
   // Anonymous usage stats from the released app only, so dev runs don't count as installs.
-  if (app.isPackaged)
-    createTelemetry({
+  if (app.isPackaged) {
+    telemetry = createTelemetry({
       getPrefs: () => prefs.get(),
       saveInstallId: (id) => prefs.set("installId", id),
+      accessToken: () => auth.accessToken(),
       info: () => ({
         version: app.getVersion(),
         osVersion: process.getSystemVersion(),
         arch: process.arch,
         locale: app.getLocale(),
         agents: hookStatus().filter((h) => h.target).map((h) => h.id),
+        features: features({ config: lib.config(), prefs: prefs.get(), keys: dash.keyStatus(), stats: dash.stats() }),
       }),
-    }).start();
+    });
+    telemetry.start();
+  }
   // Started at login: stay in the menu bar. Opened by you: show the window.
   const login = app.getLoginItemSettings();
   if (!(login.wasOpenedAtLogin || login.wasOpenedAsHidden)) showMain();

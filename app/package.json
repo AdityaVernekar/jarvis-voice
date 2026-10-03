@@ -21,6 +21,7 @@
   },
   "build": {
     "appId": "dev.earpiece.mac",
+    "protocols": [{ "name": "Earpiece", "schemes": ["earpiece"] }],
     "productName": "Earpiece",
     "directories": { "output": "dist", "buildResources": "build" },
     "files": ["main/**", "preload/**", "renderer/**", "build/tray*.png", "package.json"],
