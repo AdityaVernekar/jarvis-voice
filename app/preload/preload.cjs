@@ -49,7 +49,7 @@ contextBridge.exposeInMainWorld("earpiece", {
     ipcRenderer.on("card-rest", h);
     return () => ipcRenderer.off("card-rest", h);
   },
-  // The app saw the pointer leave the island (false) while it was open.
+  // Native cursor position determines whether the pointer is inside the island.
   onPointer: (cb) => {
     const h = (_e, inside) => cb(Boolean(inside));
     ipcRenderer.on("card-pointer", h);

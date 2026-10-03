@@ -101,7 +101,7 @@ function setView(v, force = false) {
   island.dataset.view = v;
   const { w, h } = sizeFor(v);
   island.dataset.motion = w * h >= before.w * before.h ? "grow" : "shrink";
-  reportRect(w, h);
+  reportRect(v === "gone" ? 0 : w, v === "gone" ? 0 : h);
   island.style.setProperty("--w", `${w}px`);
   island.style.setProperty("--h", `${h}px`);
   clearTimeout(goneTimer);
@@ -417,8 +417,6 @@ applyGeom(geom);
 
 function pointerEntered() {
   if (hovering) return;
-  hovering = true;
-  clearTimeout(timer);
   J.card("hover", true);
 }
 island.addEventListener("mouseenter", pointerEntered);
@@ -431,11 +429,14 @@ function pointerLeft() {
 }
 island.addEventListener("mouseleave", () => {
   J.card("hover", false);
-  pointerLeft();
 });
-// The app watches the pointer too: a quick move off the screen edge or into another app can skip
-// mouseleave, and the island would stay open.
-J.onPointer?.((inside) => inside || pointerLeft());
+// Only the native cursor check can end hover. CSS expansion and click-through changes can
+// emit mouseleave while the pointer is still moving into the full panel.
+J.onPointer?.((inside) => {
+  if (!inside) return pointerLeft();
+  hovering = true;
+  clearTimeout(timer);
+});
 island.addEventListener("click", (e) => {
   pointerEntered();
   if (view === "rest") return setView("list");

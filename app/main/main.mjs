@@ -11,6 +11,7 @@ import { createDashboard, tidyPath } from "./dashboard.mjs";
 import { createUpdater } from "./updater.mjs";
 import { createAuth } from "./auth.mjs";
 import { createTelemetry, features } from "./telemetry.mjs";
+import { createCardPointer } from "./card-pointer.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(here, "..");
@@ -365,8 +366,14 @@ let cardReady = false;
 let cardPending = null;
 let cardMtime = 0;
 let cardHover = false;
-let islandRect = { w: 0, h: 0 }; // the island's current size, from the renderer
-let pointerTimer = null;
+const cardPointer = createCardPointer({
+  getWindow: () => cardWin,
+  getCursor: () => screen.getCursorScreenPoint(),
+  onChange(on) {
+    cardHover = on;
+    if (cardWin && !cardWin.isDestroyed()) cardWin.webContents.send("card-pointer", on);
+  },
+});
 
 // The island rests in the notch unless the card is off or you only want it for updates.
 const restIcon = () => prefs.get().showCard !== false && prefs.get().notchIcon !== "updates";
@@ -404,12 +411,13 @@ function createCardWin() {
   lockDown(cardWin);
   cardWin.webContents.once("did-finish-load", () => {
     cardReady = true;
+    cardPointer.start();
     sendAgents();
     if (cardPending) sendCard(cardPending);
     else if (restIcon()) showRest();
     cardPending = null;
   });
-  cardWin.on("closed", () => (clearInterval(pointerTimer), (cardWin = null), (cardReady = false), (cardHover = false)));
+  cardWin.on("closed", () => (cardPointer.stop(), (cardWin = null), (cardReady = false)));
 }
 
 // A notch shows up as a taller menu bar (about 37 pt against 24) on the built-in screen. The
@@ -505,28 +513,6 @@ function sendCard(c) {
     if (d.id !== currentDisplay().id) placeCard(d);
   }
   cardWin.webContents.send("card", c);
-}
-
-// While the pointer is on the island, check where it is a few times a second. Leaving fast (off
-// the top edge, or straight into another app to click) can skip the page's mouseleave, and the
-// island would stay open and keep catching clicks. A click outside always means the pointer left.
-function setCardHover(on) {
-  cardHover = on;
-  cardWin?.setIgnoreMouseEvents(!on, { forward: true });
-  clearInterval(pointerTimer);
-  pointerTimer = null;
-  if (!on) return;
-  pointerTimer = setInterval(() => {
-    if (!cardWin?.isVisible()) return setCardHover(false);
-    const b = cardWin.getBounds();
-    const p = screen.getCursorScreenPoint();
-    const half = islandRect.w / 2 + 10; // plus the curved shoulders
-    const cx = b.x + b.width / 2;
-    const inside = p.x >= cx - half && p.x <= cx + half && p.y >= b.y && p.y <= b.y + islandRect.h + 2;
-    if (inside) return;
-    setCardHover(false);
-    cardWin.webContents.send("card-pointer", false);
-  }, 60);
 }
 
 function deliverCard(payload) {
@@ -936,10 +922,12 @@ ipcMain.handle("card", (e, action, value) => {
     const d = homeDisplay();
     if (!cardHover && cardWin.isVisible() && d.id !== currentDisplay().id) placeCard(d);
   }
-  else if (action === "hover") setCardHover(Boolean(value));
+  // DOM enter/leave only requests a check; animation and click-through can emit
+  // spurious leave events while the native cursor is still over the island.
+  else if (action === "hover") cardPointer.check();
   else if (action === "rect") {
     const v = value && typeof value === "object" ? value : {};
-    islandRect = { w: Math.min(Math.max(Number(v.w) || 0, 0), CARD_W), h: Math.min(Math.max(Number(v.h) || 0, 0), CARD_H) };
+    cardPointer.setRect({ w: Math.min(Math.max(Number(v.w) || 0, 0), CARD_W), h: Math.min(Math.max(Number(v.h) || 0, 0), CARD_H) });
   }
   else if (action === "stop") (lib.stopSpeaking(), refresh());
   else if (action === "open") showMain("overview");
