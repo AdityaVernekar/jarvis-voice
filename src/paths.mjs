@@ -37,4 +37,5 @@ export const P = {
   tmp: path.join(HOME, "tmp"),
   socket: path.join(HOME, "hub.sock"), // the desktop app (or `earpiece serve`) listens here
   shim: path.join(HOME, "bin", "earpiece-hook"), // what hooks call when the hub is installed
+  account: path.join(HOME, "account.json"), // Pro sign-in, written by the Mac app (src/pro.mjs)
 };

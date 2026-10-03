@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createDashboard, tidyPath } from "./dashboard.mjs";
 import { createUpdater } from "./updater.mjs";
 import { createAuth } from "./auth.mjs";
-import { createTelemetry, features } from "./telemetry.mjs";
+import { createTelemetry, features, KEY, SUPABASE } from "./telemetry.mjs";
 import { createCardPointer } from "./card-pointer.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -109,13 +109,38 @@ const auth = createAuth({
   save: (session) => prefs.set("session", session && safeStorage.encryptString(JSON.stringify(session)).toString("base64")),
   openExternal: (url) => shell.openExternal(url),
 });
-const account = () => ({ user: auth.user(), error: authError });
+let plan = null; // { plan, lines_used, lines_cap, period_end } from my_plan(), null when signed out
+const account = () => ({ user: auth.user(), error: authError, plan: auth.user() ? plan : null });
+
+// The core (hub worker, hook fallbacks) speaks in other processes, so Pro's hosted voice reads the
+// signed-in token and plan from ~/.earpiece/account.json (0600). Refreshed every 10 minutes; the
+// token itself is refreshed 15 minutes before it expires, so the file never holds a dead one.
+async function syncAccount() {
+  if (!lib.P) return;
+  const token = await auth.accessToken().catch(() => null);
+  if (!token) {
+    plan = null;
+    fs.rmSync(lib.P.account, { force: true });
+    return;
+  }
+  try {
+    const res = await fetch(`${SUPABASE}/rest/v1/rpc/my_plan`, {
+      method: "POST",
+      headers: { apikey: KEY, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) plan = await res.json();
+  } catch {} // offline: keep the last known plan
+  const known = plan?.plan || lib.readJson(lib.P.account, {})?.plan || "free";
+  lib.writeJson(lib.P.account, { access_token: token, expires_at: auth.expiresAt(), plan: known });
+}
 
 // The browser hands the sign-in back as earpiece://auth?code=….
 async function onAuthLink(url) {
   authError = null;
   try {
-    if (await auth.handleCallback(url)) telemetry?.ping();
+    if (await auth.handleCallback(url)) (await syncAccount(), telemetry?.ping());
   } catch (e) {
     authError = e.message;
     lib.log?.({ warn: `sign-in: ${e.message}` });
@@ -207,7 +232,7 @@ async function start() {
     quit: () => app.quit(),
     onChange: scheduleRefresh,
   });
-  dash = createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect: connectAgents, disconnect: disconnectAgents, refresh, prefs, updater, auth, account });
+  dash = createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect: connectAgents, disconnect: disconnectAgents, refresh, prefs, updater, auth, account, syncAccount });
   Menu.setApplicationMenu(appMenu());
   noteDisplays();
   for (const ev of ["display-added", "display-removed", "display-metrics-changed"]) screen.on(ev, onDisplaysChanged);
@@ -227,11 +252,13 @@ async function start() {
         arch: process.arch,
         locale: app.getLocale(),
         agents: hookStatus().filter((h) => h.target).map((h) => h.id),
-        features: features({ config: lib.config(), prefs: prefs.get(), keys: dash.keyStatus(), stats: dash.stats() }),
+        features: { ...features({ config: lib.config(), prefs: prefs.get(), keys: dash.keyStatus(), stats: dash.stats() }), plan: plan?.plan || "free" },
       }),
     });
     telemetry.start();
   }
+  syncAccount().then(refresh);
+  setInterval(() => syncAccount().then(refresh), 10 * 60_000).unref?.();
   // Started at login: stay in the menu bar. Opened by you: show the window.
   const login = app.getLoginItemSettings();
   if (!(login.wasOpenedAtLogin || login.wasOpenedAsHidden)) showMain();

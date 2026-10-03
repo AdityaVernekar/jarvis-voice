@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import { SILENT_REASONS, showCard } from "../card.mjs";
 import { agentConfig, config } from "../config.mjs";
+import { proToken } from "../pro.mjs";
 import { withLock } from "../lock.mjs";
 import { P } from "../paths.mjs";
 import { policyBlock } from "../policy.mjs";
@@ -75,7 +76,8 @@ export async function speak(text, kind = "info", meta = {}, deps = {}) {
     const lang = meta.lang || "en";
     const began = now();
     const stopped = () => (readJson(P.flushed, {}).at || 0) >= began; // Stop pressed mid-line
-    const chain = provider ? [provider] : cfg.ttsProviders;
+    // Pro: hosted voice first, then the user's own chain as before.
+    const chain = provider ? [provider] : [...(proToken() ? ["earpiece"] : []), ...cfg.ttsProviders.filter((e) => e !== "earpiece")];
 
     // The card (and the app's "speaking" indicator, which reads the card) must not appear while we
     // are still waiting on a TTS API: the voice hasn't started, and a slow or hung provider would

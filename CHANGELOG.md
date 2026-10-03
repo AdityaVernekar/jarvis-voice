@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Earpiece Pro hosted voice (groundwork).** Signed-in Pro users get Smallest voices and one-line summaries on Earpiece's keys, with no API keys of their own. The Mac app keeps a short-lived token in `~/.earpiece/account.json`; the new `earpiece` engine and hosted summary are tried first and fall back to your own keys or the system voice on any error, over the 3,000-line monthly cap, or when you're not Pro. General → Account shows the plan and this month's usage. Server code (Supabase Edge Functions and migrations) is in `supabase/`. See [SECURITY.md](SECURITY.md#earpiece-pro-hosted-voice).
+
 ## 0.4.0 (2026-10-03)
 
 - **Optional sign-in with Google.** A sign-up screen on first launch (Continue with Google, or Skip for now), and General → **Account** later. The session is stored encrypted with the macOS Keychain. While you are signed in, usage stats are always shared with your account; sign out to stop. General also states what is never collected: prompts, code, agent messages, summaries, project names, paths and keys.

@@ -9,7 +9,8 @@ import { KEY, SUPABASE } from "./telemetry.mjs";
 
 export const REDIRECT = "earpiece://auth";
 const PENDING_MS = 10 * 60_000; // a sign-in left open in the browser longer than this is dropped
-const REFRESH_EARLY_S = 60;
+// Refresh well before expiry: the core reads the token from ~/.earpiece/account.json between syncs.
+const REFRESH_EARLY_S = 15 * 60;
 
 const b64url = (buf) => buf.toString("base64url");
 export const challengeFor = (verifier) => b64url(crypto.createHash("sha256").update(verifier).digest());
@@ -40,6 +41,7 @@ export function createAuth({ load, save, openExternal, fetch = globalThis.fetch,
 
   return {
     user: () => load()?.user || null,
+    expiresAt: () => load()?.expires_at || 0,
 
     signIn() {
       const verifier = b64url(crypto.randomBytes(32));

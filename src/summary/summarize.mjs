@@ -1,5 +1,6 @@
 // Turn an agent's final message into one spoken sentence, in the configured language.
 import { apiKey } from "../config.mjs";
+import { hosted, proToken } from "../pro.mjs";
 import { langInstruction, SCRIPT } from "../i18n.mjs";
 import { isDry, log, plainFirstSentence, redact } from "../util.mjs";
 
@@ -36,6 +37,16 @@ export async function summarize(text, cfg, { fetch = globalThis.fetch } = {}) {
   // "none": nothing leaves the machine; speak the agent's own first sentence.
   if (isDry() || !text || cfg.summaryProvider === "none") return fallback;
   const lang = cfg.speakLanguage || "en";
+  // Pro: Earpiece's hosted summary first (same prompt, on Earpiece's key), then the user's own.
+  if (proToken()) {
+    try {
+      const res = await hosted("summarize", { text: String(text).slice(-6000), instruction: langInstruction(lang) }, { fetch, timeoutMs: cfg.summaryTimeoutMs + 2000 });
+      const line = redact(String((await res.json()).line || "").trim());
+      if (line) return { line, via: "earpiece", lang: SCRIPT[lang] && !SCRIPT[lang].test(line) ? "en" : lang };
+    } catch (e) {
+      log({ warn: "summary_failed", provider: "earpiece", error: String(e?.message || e) });
+    }
+  }
   const order = [...new Set([cfg.summaryProvider, "openai"])].filter((n) => LLMS[n]);
   for (const provider of order) {
     try {

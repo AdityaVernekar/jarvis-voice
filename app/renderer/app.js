@@ -881,7 +881,15 @@ function account() {
       "div",
       { class: "group" },
       u
-        ? row(u.name || u.email, u.name ? u.email : "Signed in with Google", btn("Sign out", () => act("signOut").then(() => setPref("hideSignInNudge", true))))
+        ? [
+            row(u.name || u.email, u.name ? u.email : "Signed in with Google", btn("Sign out", () => act("signOut").then(() => setPref("hideSignInNudge", true)))),
+            row(
+              A.plan?.plan === "pro" ? "Earpiece Pro" : "Free plan",
+              A.plan?.plan === "pro"
+                ? `Hosted voice and summaries on Earpiece's keys, no API keys needed. ${Number(A.plan.lines_used || 0).toLocaleString()} of ${Number(A.plan.lines_cap || 0).toLocaleString()} hosted lines used this month; after that your own keys or the system voice take over.`
+                : "Everything in Earpiece works on Free with your own keys or the system voice. Pro adds hosted voice and summaries.",
+            ),
+          ]
         : row(
             "Sign in with Google",
             A.error ? `Sign-in didn't finish: ${A.error}` : "Optional. Everything works without an account. Signing in links your usage stats to you, so we know who uses Earpiece and can tell you about new features.",
@@ -933,7 +941,9 @@ function general() {
           ),
       row(
         "Your work stays on your Mac",
-        "We never collect your prompts, code, agent messages, summaries, project names, file paths or API keys. Settings and logs stay local in ~/.earpiece. The only exception is a voice or summary provider you add your own key for, which gets just the text it needs to speak a line.",
+        D.account?.plan?.plan === "pro"
+          ? "We never collect your prompts, code, project names, file paths or API keys, and settings and logs stay local in ~/.earpiece. With Pro's hosted voice, the end of an agent's reply (to summarise it) and the line to speak pass through Earpiece's server to OpenAI and Smallest. They aren't stored; only counts are kept."
+          : "We never collect your prompts, code, agent messages, summaries, project names, file paths or API keys. Settings and logs stay local in ~/.earpiece. The only exception is a voice or summary provider you add your own key for, which gets just the text it needs to speak a line.",
       ),
     ),
     h("h2", {}, "Files"),
