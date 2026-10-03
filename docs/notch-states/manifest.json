@@ -1,0 +1,128 @@
+{
+  "generatedAt": "2026-10-03T15:40:28.640Z",
+  "rendererSourceSha256": {
+    "card.html": "533fb75bcb380a28460e1064d7a796f966ac958d9247aeae5d2dfb675744767c",
+    "card.css": "f3a2689c5713650f90aa2ee7977ccaa0b089f93be028e7522d900e0103c4f921",
+    "card.js": "2a82fe5f9ec561cac499cdb755b976f59882bfb4957c0056a44a88bba0096f50",
+    "logos.js": "e481c7da6e2d81dd12bb7315fca7566246cc4583c13c9f26eaca335480b7aeeb"
+  },
+  "method": "Actual Electron card renderer with isolated sample fixtures; not live agent sessions. Native compositor clipping is not captured by capturePage.",
+  "scope": "Four essential views, MacBook notch only",
+  "records": [
+    {
+      "id": "01-resting",
+      "title": "1. Resting notch",
+      "view": "rest",
+      "description": "Active count on the left, status on the right, with the MacBook camera area kept clear in the centre.",
+      "display": "notch",
+      "filename": "notch/01-resting.png",
+      "width": 276,
+      "height": 33,
+      "visibleButtons": [],
+      "pixels": {
+        "width": 480,
+        "height": 80
+      },
+      "cornerMaxAlphaDifference": 0
+    },
+    {
+      "id": "02-agents",
+      "title": "2. Agents list",
+      "view": "list",
+      "description": "Click the notch to see your agents and their status. Click a row to go to that agent.",
+      "display": "notch",
+      "filename": "notch/02-agents.png",
+      "width": 460,
+      "height": 255,
+      "visibleButtons": [
+        {
+          "text": "On",
+          "disabled": false
+        },
+        {
+          "text": "Quiet",
+          "disabled": false
+        },
+        {
+          "text": "Off",
+          "disabled": false
+        },
+        {
+          "text": "Open dashboard",
+          "disabled": false
+        }
+      ],
+      "pixels": {
+        "width": 480,
+        "height": 291
+      },
+      "cornerMaxAlphaDifference": 1
+    },
+    {
+      "id": "03-permission",
+      "title": "3. Permission request",
+      "view": "open",
+      "description": "Review a tool request and choose Allow, Deny or In terminal. Always allow appears only when offered.",
+      "display": "notch",
+      "filename": "notch/03-permission.png",
+      "width": 460,
+      "height": 232,
+      "visibleButtons": [
+        {
+          "text": "Fold back into the notch",
+          "disabled": false
+        },
+        {
+          "text": "Allow",
+          "disabled": false
+        },
+        {
+          "text": "Always allow",
+          "disabled": false
+        },
+        {
+          "text": "Deny",
+          "disabled": false
+        },
+        {
+          "text": "In terminal",
+          "disabled": false
+        }
+      ],
+      "pixels": {
+        "width": 480,
+        "height": 268
+      },
+      "cornerMaxAlphaDifference": 1
+    },
+    {
+      "id": "04-reply",
+      "title": "4. Text reply",
+      "view": "open",
+      "description": "Read the agent's question and send your reply directly from the notch.",
+      "display": "notch",
+      "filename": "notch/04-reply.png",
+      "width": 460,
+      "height": 217,
+      "visibleButtons": [
+        {
+          "text": "Fold back into the notch",
+          "disabled": false
+        },
+        {
+          "text": "In terminal",
+          "disabled": false
+        },
+        {
+          "text": "Send",
+          "disabled": false
+        }
+      ],
+      "pixels": {
+        "width": 480,
+        "height": 253
+      },
+      "cornerMaxAlphaDifference": 1
+    }
+  ]
+}

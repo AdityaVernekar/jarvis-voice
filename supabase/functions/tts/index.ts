@@ -11,17 +11,19 @@ const MODELS = ["lightning_v3.1_pro", "lightning_v3.1"];
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-// Signed in, Pro, and under the monthly cap → the user id. Otherwise a ready-made error response.
+// One round trip: PostgREST verifies the user's JWT and pro_status() reads the plan and this month's
+// lines. Signed in, Pro and under the cap → the user id; otherwise a ready-made error response.
 async function proUser(req: Request): Promise<{ uid: string } | { res: Response }> {
-  const token = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
-  const { data, error } = await admin.auth.getUser(token);
-  if (error || !data.user) return { res: json(401, { error: "sign in to use hosted voice" }) };
-  const { data: pro } = await admin.rpc("is_pro", { uid: data.user.id });
-  if (!pro) return { res: json(402, { error: "hosted voice is part of Earpiece Pro" }) };
-  const month = new Date().toISOString().slice(0, 7) + "-01";
-  const { data: u } = await admin.from("usage").select("lines").eq("user_id", data.user.id).eq("month", month).maybeSingle();
-  if ((u?.lines ?? 0) >= CAP) return { res: json(429, { error: "monthly hosted voice limit reached" }) };
-  return { uid: data.user.id };
+  const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/rest/v1/rpc/pro_status`, {
+    method: "POST",
+    headers: { apikey: req.headers.get("apikey") || Deno.env.get("SUPABASE_ANON_KEY")!, Authorization: req.headers.get("Authorization") || "", "Content-Type": "application/json" },
+    body: "{}",
+  }).catch(() => null);
+  const s = r?.ok ? await r.json() : null;
+  if (!s?.uid) return { res: json(401, { error: "sign in to use hosted voice" }) };
+  if (!s.pro) return { res: json(402, { error: "hosted voice is part of Earpiece Pro" }) };
+  if (s.lines >= CAP) return { res: json(429, { error: "monthly hosted limit reached" }) };
+  return { uid: s.uid };
 }
 
 async function smallest(b: Record<string, unknown>): Promise<Response> {
@@ -44,15 +46,10 @@ async function openai(text: string): Promise<Response> {
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "POST only" });
-  const who = await proUser(req);
+  // The plan check and reading the body run together: one less wait before the provider call.
+  const [who, p] = await Promise.all([proUser(req), (req.json() as Promise<Record<string, unknown>>).catch(() => null)]);
   if ("res" in who) return who.res;
-
-  let p: Record<string, unknown>;
-  try {
-    p = await req.json();
-  } catch {
-    return json(400, { error: "bad json" });
-  }
+  if (!p || typeof p !== "object") return json(400, { error: "bad json" });
   const text = typeof p.text === "string" ? p.text.trim() : "";
   if (!text || text.length > 400) return json(400, { error: "text must be 1-400 characters" });
   const voice = typeof p.voice_id === "string" && /^[\w-]{1,40}$/.test(p.voice_id) ? p.voice_id : "meher";
@@ -78,6 +75,6 @@ Deno.serve(async (req) => {
     fallback = 1;
   }
 
-  await admin.rpc("record_usage", { uid: who.uid, p_lines: 1, p_chars: text.length, p_summaries: 0, p_fallbacks: fallback });
+  EdgeRuntime.waitUntil(Promise.resolve(admin.rpc("record_usage", { uid: who.uid, p_lines: 1, p_chars: text.length, p_summaries: 0, p_fallbacks: fallback }))); // counted after the reply, not before
   return new Response(audio, { headers: { "Content-Type": type, "X-Earpiece-Engine": fallback ? "openai" : "smallest" } });
 });

@@ -411,6 +411,9 @@ function createCardWin() {
     height: CARD_H,
     show: false,
     frame: false,
+    // The island draws concave shoulders. Native corner rounding clips them at
+    // full width, leaving gaps where the expanded panel meets the screen edge.
+    roundedCorners: false,
     transparent: true,
     resizable: false,
     movable: false,
