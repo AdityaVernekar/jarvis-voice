@@ -134,7 +134,7 @@ function modeSeg() {
 function modeSentence() {
   if (!D.hub.ok) return { dot: "off", text: "Hub not running", sub: D.hub.error || "Earpiece can't hear your agents right now. Quit and reopen the app." };
   if (D.mode === "off") return { dot: "off", text: "Off", sub: D.until ? `Back on at ${clock(D.until)}` : "Earpiece won't speak until you turn it back on." };
-  if (D.mode === "quiet") return { dot: "quiet", text: "Quiet", sub: `Only speaks when an agent needs you or hits an error${D.until ? `, until ${clock(D.until)}` : ""}.` };
+  if (D.mode === "quiet") return { dot: "quiet", text: "Quiet", sub: `Shows every update in the notch without speaking${D.until ? `, until ${clock(D.until)}` : ""}.` };
   if (D.quietNow) {
     const allow = Array.isArray(D.quietHours?.allow) ? D.quietHours.allow : ["needs_input"];
     return { dot: "quiet", text: "Quiet hours", sub: allow.length ? `Until ${D.quietHours.end}. Still says: ${allow.map((k) => KIND_LABEL[k]?.split(" (")[0].toLowerCase()).join(", ")}.` : `Silent until ${D.quietHours.end}.` };
@@ -159,11 +159,58 @@ function chrome() {
 
 // ---------- sections ----------
 
+// ---------- updates ----------
+// The app checks GitHub a few seconds after launch and every 6 hours (main/updater.mjs). With
+// one click it downloads, checks and installs the new version, then reopens.
+let laterFor = null; // the version you said "Later" to; the banner comes back for the next one
+const UPDATE_BUSY = new Set(["downloading", "verifying", "installing"]);
+function updateBanner(where) {
+  const u = D.update;
+  if (!u?.newer) return null;
+  const busy = UPDATE_BUSY.has(u.status);
+  if (where === "overview" && laterFor === u.latest && !busy && u.status !== "failed") return null;
+  const pct = Math.round((u.progress || 0) * 100);
+  const title =
+    u.status === "downloading" ? `Downloading Earpiece ${u.latest}… ${pct}%`
+    : u.status === "verifying" ? "Checking the download…"
+    : u.status === "installing" ? "Installing. Earpiece reopens in a moment."
+    : u.status === "failed" ? "The update didn't finish"
+    : `Earpiece ${u.latest} is out`;
+  const sub =
+    busy ? "Keep working. Nothing changes until the new version is ready."
+    : u.status === "failed" ? `${(u.error || "").replace(/^Update failed: /, "").replace(/^./, (c) => c.toUpperCase())}. Download it and drag it to Applications instead; your settings stay.`
+    : u.oneClick ? `You have ${u.current}. Update installs it and reopens Earpiece.`
+    : `You have ${u.current}. ${u.blocker || "Download it and drag it to Applications."}`;
+  const install = async () => {
+    const r = await act("installUpdate");
+    if (r && !r.oneClick && r.status !== "failed") toast("Opening the download in your browser");
+  };
+  return h(
+    "div",
+    { class: `group update-banner ${u.status}` },
+    h(
+      "div",
+      { class: "row" },
+      h("div", { class: "label" }, h("b", {}, title), h("small", {}, sub.trim())),
+      busy
+        ? h("div", { class: "update-bar", role: "progressbar", "aria-valuenow": String(pct) }, h("i", { style: `width:${u.status === "downloading" ? pct : 100}%` }))
+        : h(
+            "div",
+            { class: "ctrl" },
+            where === "overview" ? btn("Later", () => ((laterFor = u.latest), render())) : null,
+            btn("What's new", () => act("openUrl", { url: u.url })),
+            u.oneClick && u.status !== "failed" ? btn("Update", install, "primary") : btn("Download", () => act("downloadUpdate"), "primary"),
+          ),
+    ),
+  );
+}
+
 function overview() {
   const m = modeSentence();
   const connected = D.agents.filter((a) => a.target);
   const s = D.stats;
   const parts = [
+    updateBanner("overview"),
     h(
       "div",
       { class: "group" },
@@ -237,6 +284,14 @@ function sessionActions(r) {
   return h(
     "div",
     { class: "ctrl session-actions" },
+    btn("Open", async () => {
+      // Brings forward the agent's terminal tab or editor window (or just its app).
+      try {
+        await J.session("jump", r.agentId, r.session);
+      } catch (e) {
+        toast(e.message || String(e), true);
+      }
+    }),
     OPEN.has(r.status) ? btn("Mark done", () => run("done", `${r.project || "Session"} marked done`)) : null,
     h("button", { class: "icon-btn", title: "Forget this session", "aria-label": "Forget this session", onclick: () => run("forget", "Session removed") }, "×"),
   );
@@ -566,7 +621,7 @@ function quiet() {
       row(modeSentence().text, modeSentence().sub, modeSeg()),
       row(
         "Quiet for a while",
-        "Only questions and errors get through.",
+        "Nothing is read aloud. Every update still shows in the notch.",
         select(
           [
             ["", "Choose…"],
@@ -755,7 +810,6 @@ function activity() {
   ];
 }
 
-let update = null;
 async function setPref(key, value) {
   try {
     await act("setPref", { key, value });
@@ -774,13 +828,28 @@ function general() {
       row("Show in Dock", "Off keeps Earpiece only in the menu bar. The window is still one click away there.", sw(P.showInDock, (v) => setPref("showInDock", v), "Show in Dock")),
       row(
         "Show a card when Earpiece speaks",
-        "A small card at the top of the screen with the agent and what it said. It also shows in quiet mode, when nothing is read aloud.",
+        "The agent and what it said open out of the notch for a few seconds, then fold back into it. Click the notch to see it again. It also shows in quiet mode, when nothing is read aloud. Turning this off also removes the notch icon.",
         h("div", { class: "ctrl" }, btn("Preview", () => J.previewCard()), sw(P.showCard, (v) => setPref("showCard", v), "Show a card when Earpiece speaks")),
+      ),
+      row(
+        "Notch",
+        "The card lives in the MacBook notch and opens from it when you click. Screens without a notch get the same pill at the top centre. Change this if your notch isn't picked up.",
+        select([["auto", "Detect"], ["on", "Always use the notch"], ["off", "No notch"]], P.notch || "auto", (v) => setPref("notch", v), "Notch"),
+      ),
+      row(
+        "Notch icon",
+        "Always: a small Earpiece icon rests in the notch with a count of running agents and a status dot. Click it to see every agent and jump to one. Only on updates: the notch stays empty until an agent says something.",
+        select([["always", "Always"], ["updates", "Only on updates"]], P.notchIcon || "always", (v) => setPref("notchIcon", v), "Notch icon"),
       ),
       row(
         "Answer from the card",
         "Approve or deny Claude Code and Codex tool requests, and reply when they ask you something, right from the card. Needs the card on. Restart open sessions after changing it; in Codex, trust the new hooks once with /hooks. If you don't answer in about two minutes, the question goes back to the terminal.",
         sw(P.answerFromCard && P.showCard, (v) => setPref("answerFromCard", v), "Answer from the card"),
+      ),
+      row(
+        "Share anonymous usage stats",
+        "A few times a day: a random install id, the app and macOS versions, your Mac's chip type, language, and which agents are connected. Never your code, prompts, summaries, project names or paths. It tells us how many people use Earpiece.",
+        sw(P.shareStats, (v) => setPref("shareStats", v), "Share anonymous usage stats"),
       ),
     ),
     h("h2", {}, "Files"),
@@ -792,15 +861,20 @@ function general() {
       row("Earpiece folder", h("span", { class: "mono" }, D.home), btn("Show in Finder", () => act("open", { what: "home" }))),
     ),
     h("h2", {}, "About"),
+    updateBanner("general"),
     h(
       "div",
       { class: "group" },
       row(
         `Earpiece ${D.version}`,
-        update ? (update.newer ? `Version ${update.latest} is available.` : update.latest ? "You're up to date." : "No app releases published yet.") : "Open source, MIT licence.",
-        update?.newer ? btn("Download", () => act("openUrl", { url: update.url }), "primary") : null,
+        D.update?.error && !D.update.newer ? D.update.error
+          : D.update?.status === "current" ? `You're up to date. Checked ${ago(D.update.checkedAt)}.`
+          : D.update?.newer ? `Version ${D.update.latest} is available.`
+          : "Open source, MIT licence. Checks for updates every few hours.",
         btn("Check for updates", async () => {
-          update = await act("checkUpdate");
+          const u = await act("checkUpdate");
+          D.update = u;
+          if (u.status === "current") toast("You're up to date");
           render();
         }),
       ),
@@ -869,7 +943,8 @@ J.onState((s) => {
   chrome();
   clearTimeout(pending);
   pending = setTimeout(async () => {
-    if (!["overview", "agents", "quiet"].includes(section)) return;
+    // General too while an update runs, so its banner shows the progress.
+    if (!["overview", "agents", "quiet"].includes(section) && !(section === "general" && D.update && (UPDATE_BUSY.has(D.update.status) || D.update.status === "failed"))) return;
     if (document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName)) return;
     try {
       await reload();

@@ -32,7 +32,8 @@ export const quietAllows = (qh, kind) => (Array.isArray(qh?.allow) ? qh.allow : 
 export function policyBlock(kind, cfg, d = new Date()) {
   const mode = currentMode();
   if (mode === "off") return "mode_off";
-  if (mode === "quiet" && kind !== "needs_input" && kind !== "error") return "mode_quiet";
+  // Quiet: nothing is spoken or chimed. Every line still shows on the card, tagged "Quiet".
+  if (mode === "quiet") return "mode_quiet";
   if (inQuietHours(cfg.quietHours, d) && !quietAllows(cfg.quietHours, kind)) return "quiet_hours";
   return null;
 }

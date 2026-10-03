@@ -1,42 +1,155 @@
-// Floating card. The app sends it one card at a time; it animates in, stays while the line is
-// spoken (and while you hover), then animates out and tells the app to hide the window.
-// A question an agent is waiting on ("ask" cards) stays until it is answered, times out, or you
-// send it back to the terminal. Nothing is approved without a click on a button.
+// The notch island. The app sends it one card at a time, plus the shape of the screen it is on
+// (notch or not), and the list of running agents. Six views:
+//   gone  - nothing on screen (the app hides the window); only when the resting icon is off
+//   rest  - the resting icon: Earpiece mark and running count on the left wing, a status dot on
+//           the right (green working, amber needs you, red error, grey idle); click for the list
+//   list  - the agents list, dropped down from the resting icon; click a row to go to that agent
+//   mini  - collapsed into the notch after a line: agent logo on the left, wave or dot on the right
+//   peek  - a new line opens it for a few seconds, then it folds back into the notch
+//   open  - you clicked it; it stays open while the pointer is on it
+// A question an agent is waiting on ("ask" cards) never opens by itself: the island turns amber
+// and pulses in the notch until you click it. Nothing is approved without a click on a button,
+// and the buttons only wake up a moment after the question is opened.
 const J = window.earpiece;
 const $ = (id) => document.getElementById(id);
-const card = $("card");
+const island = $("card");
+const box = $("replyText");
 const REASON = { mode_quiet: "Quiet", quiet_hours: "Quiet hours", agent_disabled: "Muted", voice_failed: "No voice" };
-// A "speaking" card is replaced within seconds by spoken/stopped. If it never is (the process that
-// wrote it died), don't leave the window stuck on screen.
-const SPEAKING_MAX_MS = 60_000;
-// Buttons wake up a moment after a question appears, so a click meant for the window underneath
-// can't approve a command.
+
+const FULL_W = 460; // the window is 480 wide; 10 px either side for the curved shoulders
+const WING = 46; // each wing next to the notch, collapsed
+const VIRTUAL = { w: 230, h: 32 }; // the collapsed pill on a screen without a notch
+const REST_WING = 36; // each wing of the resting icon
+const REST_VIRTUAL_H = 24; // the resting pill on a screen without a notch
+const STATUS = { waiting: "Needs you", error: "Error", working: "Working", done: "Done", idle: "Idle" };
 const ARM_MS = 700;
+// A "speaking" card is replaced within seconds by spoken/stopped. If it never is (the process
+// that wrote it died), don't leave the wings up for ever.
+const SPEAKING_MAX_MS = 60_000;
+// The pointer left the open island (or you clicked somewhere else, which means it left): fold back.
+const LEAVE_MS = 450;
+const LIST_LEAVE_MS = 250;
+
+let geom = { notch: false, notchW: 0, notchH: 0 };
 let current = null;
-let hideTimer = null;
-let armTimer = null;
+let view = "gone";
 let hovering = false;
 let busy = false;
+let timer = null;
+let armTimer = null;
+let goneTimer = null;
+let rest = false; // the app wants the island resting in the notch between lines
+let agents = { rows: [], more: 0, active: 0, waiting: 0, tone: "idle", mode: "on", now: Date.now() };
 
-function holdFor(c) {
+// Where the island goes when nothing needs showing: a waiting question stays in the notch.
+const idle = () => (current?.ask ? "mini" : rest ? "rest" : "gone");
+
+// ---------- sizes ----------
+
+function applyGeom(g) {
+  geom = { notch: Boolean(g?.notch), notchW: Number(g?.notchW) || 0, notchH: Number(g?.notchH) || 0 };
+  const s = document.body.style;
+  document.body.classList.toggle("virtual", !geom.notch);
+  s.setProperty("--notch-w", `${geom.notch ? geom.notchW : 0}px`);
+  s.setProperty("--notch-h", `${geom.notch ? geom.notchH : VIRTUAL.h}px`);
+  s.setProperty("--inset", `${geom.notch ? geom.notchH : 4}px`);
+  s.setProperty("--full-w", `${FULL_W}px`);
+  setView(view, true);
+}
+
+function fullHeight() {
+  return Math.ceil($("full").offsetHeight);
+}
+
+function agentsHeight() {
+  return Math.ceil($("agents").offsetHeight);
+}
+
+function restSize() {
+  if (geom.notch) return { w: geom.notchW + 2 * REST_WING, h: geom.notchH };
+  const w = Math.ceil($("rest").querySelector(".wing.left").scrollWidth + $("rest").querySelector(".wing.right").scrollWidth) + 28;
+  return { w: Math.max(w, 56), h: REST_VIRTUAL_H };
+}
+
+function sizeFor(v) {
+  if (v === "peek" || v === "open") return { w: FULL_W, h: fullHeight() };
+  if (v === "list") return { w: FULL_W, h: agentsHeight() };
+  if (v === "rest") return restSize();
+  if (v === "mini") return geom.notch ? { w: geom.notchW + 2 * WING, h: geom.notchH } : VIRTUAL;
+  return geom.notch ? { w: geom.notchW, h: geom.notchH } : { w: 150, h: 0 };
+}
+
+// The window has a fixed size, tall enough for any view, so growing and folding are pure CSS and
+// never wait for (or stutter on) a window resize. Clicks go through the empty part. The app is
+// told where the island is, so it can tell when the pointer has left it.
+function reportSize() {
+  J.card("size", Math.max(fullHeight(), agentsHeight()) + 34);
+}
+
+function reportRect(w, h) {
+  J.card("rect", { w: Math.ceil(w), h: Math.ceil(h) });
+}
+
+// ---------- views ----------
+
+function setView(v, force = false) {
+  if (v === view && !force) return;
+  const was = view;
+  if (v === "list" && was !== "list") renderAgents(); // fill it before measuring it
+  const before = sizeFor(was);
+  view = v;
+  island.dataset.view = v;
+  const { w, h } = sizeFor(v);
+  island.dataset.motion = w * h >= before.w * before.h ? "grow" : "shrink";
+  reportRect(w, h);
+  island.style.setProperty("--w", `${w}px`);
+  island.style.setProperty("--h", `${h}px`);
+  clearTimeout(goneTimer);
+  if (v === "gone") {
+    goneTimer = setTimeout(() => view === "gone" && J.card("hidden"), 380);
+  }
+  if (v === "rest" && was !== "rest") {
+    if (!current?.ask) current = null; // the line has been seen; the next one peeks fresh
+    J.card("rest");
+  }
+  if (current?.ask) {
+    if (v === "open" && (was !== "open" || force)) {
+      arm(false); // buttons wake up ARM_MS after you can see them
+      J.card("expanded", current.ask.id);
+    } else if (v !== "open" && was === "open") {
+      arm(false);
+      J.card("expanded", null);
+    }
+  }
+  if (v !== "open" && document.activeElement === box) (box.blur(), J.card("focus", false));
+  schedule();
+}
+
+function peekFor(c) {
   if (c.brief) return 1800;
   const words = String(c.line || "").split(/\s+/).length;
-  return Math.min(Math.max(4500, words * 330 + 2500), 12000);
+  return Math.min(Math.max(3000, words * 240 + 1200), 5500);
 }
 
-function scheduleHide() {
-  clearTimeout(hideTimer);
-  if (!current || hovering || current.ask) return;
-  hideTimer = setTimeout(hide, current.state === "speaking" ? SPEAKING_MAX_MS : holdFor(current));
+function lingerFor(c) {
+  if (c.state === "speaking") return SPEAKING_MAX_MS;
+  return c.kind === "needs_input" || c.kind === "error" ? 45_000 : 15_000;
 }
 
-function hide() {
-  clearTimeout(hideTimer);
-  card.classList.remove("in");
-  card.classList.add("out");
-  setTimeout(() => {
-    if (card.classList.contains("out")) J.card("hidden");
-  }, 260);
+// One timer decides what happens next from the current view.
+function schedule() {
+  clearTimeout(timer);
+  if (hovering) return;
+  if (view === "list") return void (timer = setTimeout(() => setView(idle()), LIST_LEAVE_MS));
+  if (!current) return;
+  if (view === "peek") timer = setTimeout(() => setView(current?.brief ? idle() : "mini"), peekFor(current));
+  else if (view === "mini" && !current.ask) timer = setTimeout(() => setView(idle()), lingerFor(current));
+  else if (view === "open") timer = setTimeout(foldIfIdle, LEAVE_MS);
+}
+
+function foldIfIdle() {
+  if (hovering || busy || document.activeElement === box || (current?.ask && box.value.trim())) return;
+  setView(current?.brief ? idle() : "mini");
 }
 
 // ---------- questions ----------
@@ -52,7 +165,7 @@ function arm(on) {
   clearTimeout(armTimer);
   for (const b of choiceButtons()) b.dataset.armed = on ? "1" : "0";
   setBusy(false);
-  if (!on) armTimer = setTimeout(() => arm(true), ARM_MS);
+  if (!on && view === "open") armTimer = setTimeout(() => arm(true), ARM_MS);
 }
 
 function startTimer(expiresAt) {
@@ -80,8 +193,8 @@ function showAsk(c) {
   $("choices").hidden = !perm;
   $("always").hidden = !a.canAlways;
   $("reply").hidden = perm;
-  $("replyText").value = "";
-  $("replyText").placeholder = `Reply to ${c.agentName || "the agent"}…  (Enter to send, Shift+Enter for a new line)`;
+  box.value = "";
+  box.placeholder = `Reply to ${c.agentName || "the agent"}…  (Enter to send, Shift+Enter for a new line)`;
   $("askErr").hidden = !a.partial;
   arm(false);
   startTimer(a.expiresAt);
@@ -90,11 +203,11 @@ function showAsk(c) {
 function hideAsk() {
   $("ask").hidden = true;
   clearTimeout(armTimer);
-  if (document.activeElement === $("replyText")) $("replyText").blur();
+  if (document.activeElement === box) box.blur();
 }
 
 async function answer(payload) {
-  if (!current?.ask || busy) return;
+  if (!current?.ask || busy || view !== "open") return;
   const id = current.ask.id;
   setBusy(true);
   let r;
@@ -107,18 +220,18 @@ async function answer(payload) {
   $("askErr").textContent = r?.error || "Couldn't send that.";
   $("askErr").hidden = false;
   setBusy(false);
+  reportSize();
 }
 
 $("allow").addEventListener("click", () => answer({ behavior: "allow" }));
 $("always").addEventListener("click", () => answer({ behavior: "always" }));
 $("deny").addEventListener("click", () => answer({ behavior: "deny" }));
-const toTerminal = () => current?.ask && J.card("defer", current.ask.id);
+const toTerminal = () => current?.ask && view === "open" && J.card("defer", current.ask.id);
 $("terminal").addEventListener("click", toTerminal);
 $("replyTerminal").addEventListener("click", toTerminal);
 
-// The card never takes the keyboard on its own. Clicking into the box makes it focusable;
+// The island never takes the keyboard on its own. Clicking into the box makes it focusable;
 // the app gives the keyboard back to your terminal when the box is done with.
-const box = $("replyText");
 box.addEventListener("mousedown", async (e) => {
   if (document.activeElement === box) return;
   e.preventDefault();
@@ -127,6 +240,7 @@ box.addEventListener("mousedown", async (e) => {
 });
 box.addEventListener("blur", () => {
   if (!box.value.trim()) J.card("focus", false);
+  schedule();
 });
 box.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
@@ -142,50 +256,198 @@ $("send").addEventListener("click", () => box.value.trim() && answer({ text: box
 
 // ---------- showing cards ----------
 
+function setLogo(el, agentId) {
+  el.querySelector(".logo")?.remove();
+  el.prepend(window.EarpieceLogos.logo(agentId));
+}
+
 function show(c) {
   if (c.state === "clear") {
     if (current?.ask) {
       current = null;
       hideAsk();
-      hide();
+      if (view !== "list") setView(idle());
     }
     return;
   }
-  const same = current && current.id === c.id;
+  const same = current && current.id === c.id && view !== "gone";
   const isAsk = Boolean(c.ask);
+  const wasAskId = current?.ask?.id || null;
   current = c;
-  card.className = `card ${c.state === "silent" ? "silent" : c.kind} ${c.state}${isAsk ? " asking" : ""}`;
+  // A silent "needs you" or error keeps its colour; only the voice is held back.
+  island.className = `island ${c.kind} ${c.state}${isAsk ? " asking" : ""}`;
   if (!same) {
-    const av = $("avatar");
-    av.querySelector(".logo")?.remove();
-    av.prepend(window.EarpieceLogos.logo(c.agentId));
+    setLogo($("avatar"), c.agentId);
+    setLogo($("miniLogo"), c.agentId);
     $("who").textContent = c.agentName || "Earpiece";
+    $("miniName").textContent = c.agentName || "Earpiece";
     $("project").textContent = c.project || "";
     $("line").textContent = c.line;
-    card.title = isAsk ? "" : c.line;
-    $("close").title = isAsk ? "Answer in the terminal instead" : "Dismiss";
+    island.title = isAsk ? "" : c.line;
+    $("full").querySelector(".head").title = isAsk ? "" : `Go to ${c.agentName || "the agent"}`;
+    $("close").title = isAsk ? "Fold back into the notch" : "Dismiss";
     if (isAsk) showAsk(c);
     else hideAsk();
   }
   const chip = $("chip");
-  let label = c.state === "silent" ? REASON[c.reason] || "Silent" : c.kind === "needs_input" ? "Needs you" : c.kind === "error" ? "Error" : "";
+  const urgent = c.kind === "needs_input" ? "Needs you" : c.kind === "error" ? "Error" : "";
+  const hush = c.state === "silent" ? REASON[c.reason] || "Silent" : "";
+  let label = [urgent, hush].filter(Boolean).join(" · ");
   if (isAsk && c.more > 0) label += ` · +${c.more} more`;
   chip.textContent = label;
   chip.hidden = !label;
+  $("miniCount").textContent = isAsk && c.more > 0 ? String(c.more + 1) : "";
+  $("miniCount").hidden = !(isAsk && c.more > 0);
+
   requestAnimationFrame(() => {
-    card.classList.add("in");
-    if (isAsk) J.card("size", card.offsetHeight + 30); // body padding, so the window fits the card
+    reportSize();
+    if (view === "list" && hovering) return; // you're looking at the list; the row has the news
+    if (isAsk) {
+      // A new question while you have one open: keep it open, re-arm for the new one.
+      if (view === "open") return wasAskId !== c.ask.id ? setView("open", true) : undefined;
+      return setView("mini", true);
+    }
+    if (same) return setView(view, true); // e.g. speaking -> spoken: keep the view, size and timers fresh
+    if (view === "open" && hovering) return setView("open", true); // you're reading: swap the text in place
+    if (view === "gone") {
+      // Start from the notch's own size so it visibly grows out of it.
+      setView("gone", true);
+      void island.offsetWidth;
+    }
+    setView("peek", true);
   });
-  scheduleHide();
 }
 
-J.onCard(show);
-card.addEventListener("mouseenter", () => ((hovering = true), clearTimeout(hideTimer), J.card("hover", true)));
-card.addEventListener("mouseleave", () => ((hovering = false), J.card("hover", false), scheduleHide()));
-card.addEventListener("click", (e) => {
-  if (current?.ask) return e.target.closest("#close") ? toTerminal() : undefined; // only the buttons act on a question
-  if (e.target.closest("#stop")) return J.card("stop");
-  if (e.target.closest("#close")) return hide();
+// ---------- the agents list ----------
+
+function ago(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function renderRest() {
+  const { active, waiting, tone, mode } = agents;
+  island.dataset.tone = tone;
+  island.dataset.mode = mode || "on";
+  $("restCount").textContent = active ? String(active) : "";
+  const bits = [active ? `${active} running` : "No agents running"];
+  if (waiting) bits.push(`${waiting} need${waiting === 1 ? "s" : ""} you`);
+  if (mode && mode !== "on") bits.push(mode === "off" ? "Earpiece is off" : "Quiet");
+  $("rest").title = `Earpiece: ${bits.join(", ")}`;
+  if (view === "rest") setView("rest", true); // the pill's width follows the count off-notch
+}
+
+function renderAgents() {
+  const list = $("agentRows");
+  const now = Date.now();
+  const skew = now - (agents.now || now); // ages are counted from the app's clock
+  list.replaceChildren(
+    ...agents.rows.map((r) => {
+      const li = el("li", r.status);
+      li.title = `Go to ${r.agent}${r.project ? ` · ${r.project}` : ""}`;
+      const av = el("span", "av");
+      av.append(window.EarpieceLogos.logo(r.agentId));
+      const tx = el("div", "tx");
+      const mt = el("div", "mt");
+      mt.append(el("b", "", r.agent), el("span", "pj", r.project || ""), el("span", "st", STATUS[r.status] || r.status), el("span", "age", r.updated ? ago(now - skew - r.updated) : ""));
+      tx.append(mt);
+      if (r.lastLine) tx.append(el("p", "ln", r.lastLine));
+      li.append(av, tx);
+      li.addEventListener("click", (e) => {
+        e.stopPropagation();
+        J.card("jump", { agent: r.agentId, session: r.session });
+        setView(idle());
+      });
+      return li;
+    }),
+  );
+  $("agentsEmpty").hidden = agents.rows.length > 0;
+  $("agentsSub").textContent = agents.active ? `${agents.active} running` : "";
+  $("agentsMore").textContent = agents.more ? `+${agents.more} more` : "";
+  for (const b of $("modes").querySelectorAll("button")) b.classList.toggle("on", b.dataset.mode === (agents.mode || "on"));
+}
+
+function onAgents(a) {
+  agents = { ...agents, ...(a || {}) };
+  if (typeof a?.rest === "boolean") setRest(a.rest);
+  renderRest();
+  renderAgents();
+  requestAnimationFrame(() => {
+    reportSize();
+    if (view === "list") setView("list", true); // the list grew or shrank
+  });
+}
+
+function setRest(on) {
+  rest = Boolean(on);
+  if (rest && view === "gone") setView("rest");
+  else if (!rest && (view === "rest" || view === "list")) setView("gone");
+}
+
+for (const b of $("modes").querySelectorAll("button")) {
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const m = b.dataset.mode;
+    J.setMode(m, m === "quiet" ? 60 : 0);
+  });
+}
+$("openDash").addEventListener("click", (e) => {
+  e.stopPropagation();
   J.card("open");
-  hide();
+  setView(idle());
+});
+
+setLogo($("restMark"), null); // the Earpiece wave
+
+J.onCard(show);
+J.onGeom?.(applyGeom);
+J.onAgents?.(onAgents);
+J.onRest?.(setRest);
+applyGeom(geom);
+
+function pointerEntered() {
+  if (hovering) return;
+  hovering = true;
+  clearTimeout(timer);
+  J.card("hover", true);
+}
+island.addEventListener("mouseenter", pointerEntered);
+// After the app has said the pointer left, the page may not see a fresh mouseenter.
+island.addEventListener("mousemove", pointerEntered);
+function pointerLeft() {
+  if (!hovering) return;
+  hovering = false;
+  schedule();
+}
+island.addEventListener("mouseleave", () => {
+  J.card("hover", false);
+  pointerLeft();
+});
+// The app watches the pointer too: a quick move off the screen edge or into another app can skip
+// mouseleave, and the island would stay open.
+J.onPointer?.((inside) => inside || pointerLeft());
+island.addEventListener("click", (e) => {
+  pointerEntered();
+  if (view === "rest") return setView("list");
+  if (view === "list") return; // rows and buttons handle their own clicks
+  if (!current) return;
+  if (view === "mini") return setView("open");
+  if (e.target.closest("#close")) return setView(idle());
+  if (current.ask) return; // only the buttons act on a question
+  if (e.target.closest("#stop")) return J.card("stop");
+  if (e.target.closest(".head")) {
+    // Take you to the agent's terminal tab or window; the app opens the dashboard if it can't.
+    J.card("jump", { agent: current.agentId || null, session: current.session || null });
+    setView(idle());
+  }
 });

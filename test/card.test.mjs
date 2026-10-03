@@ -39,6 +39,22 @@ test("quiet mode still shows a silent card, off shows nothing new", async () => 
   }
 });
 
+test("quiet mode never speaks, not even for needs you or an error, but keeps their colour", async () => {
+  setMode("quiet", 10);
+  try {
+    for (const kind of ["needs_input", "error"]) {
+      const r = await speak(`A ${kind} line.`, kind, { agent: "codex", project: "shop" });
+      assert.equal(r.skipped, "mode_quiet", kind);
+      const c = readCard();
+      assert.equal(c.line, `A ${kind} line.`);
+      assert.equal(c.state, "silent");
+      assert.equal(c.kind, kind);
+    }
+  } finally {
+    setMode("on");
+  }
+});
+
 test("a muted agent gets a silent card from the hub", async () => {
   fs.writeFileSync(path.join(home, "config.json"), JSON.stringify({ quietHours: null, chimes: false, agents: { mcpish: { enabled: false } } }));
   await processEvent({ agent: "mcpish", type: "turn_end", session: "a", project: "Docs", line: "Docs. Wrote the guide." });

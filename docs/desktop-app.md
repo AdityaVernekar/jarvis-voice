@@ -7,7 +7,7 @@ The window has seven sections:
 - **Overview**: whether Earpiece is listening, On / Quiet / Off, today's counts, the last thing it said, and every agent session from the last 24 hours (amber needs you, blue working, green done, red error).
 - **Agents**: Claude Code, Codex and Claude Desktop, each with Connect / Disconnect, the file it edits, and per-agent mute, name, voice and minimum turn length.
 - **Voice**: provider order, the Smallest.ai voice browser with search, filters and a play button, model, speed, OpenAI and macOS voices, language, and who writes summaries (including "No summaries" if nothing should leave your Mac).
-- **Quiet**: quiet or off for a while, and daily quiet hours with what may still speak.
+- **Quiet**: quiet (no voice, updates still show in the notch) or off for a while, and daily quiet hours with what may still speak.
 - **API Keys**: paste, test or remove keys, or point Earpiece at an existing `.env`. Saved keys are never shown again.
 - **Activity**: a readable log with repeats folded together and filters for spoken, kept quiet and problems.
 - **General**: open at login, show in Dock, the settings and log files, and update checks.
@@ -37,19 +37,40 @@ Open **Agents** and click **Connect** next to each agent (the popover's **Connec
 
 If you set up hooks earlier with `earpiece install`, connecting from the app replaces them, so you won't hear every line twice. Running `earpiece install` later keeps hooks on the app. To point them back at a CLI checkout, run `earpiece install --node`.
 
-Each session row also says where the agent is running, for example "Claude Code · iTerm2 · ttys004 · tmux main:2.0". See [terminal-origin.md](terminal-origin.md).
+Each session row also says where the agent is running, for example "Claude Code · iTerm2 · ttys004 · tmux main:2.0", and has an **Open** button that takes you there. See [terminal-origin.md](terminal-origin.md).
+
+## Going to the agent
+
+Click the top of the island (the logo, the agent and the project) to go to the window that agent runs in. On a question, **In terminal** sends the question back to the terminal and takes you there too. What you land on depends on the app:
+
+| App | Lands on |
+| --- | --- |
+| iTerm2 | the exact tab and split |
+| Terminal.app | the exact tab |
+| VS Code, Cursor, Windsurf and other VS Code-based editors | the window that has the project open |
+| Claude Desktop, the Codex app, Ghostty, Warp and the rest | the app comes forward |
+
+For editors, Earpiece looks up which windows are open and picks the one whose folder holds the session, so an agent started in `app/` of a monorepo you opened at its root brings that window forward rather than opening `app/` in a new one. If no window has the folder, the editor just comes forward. If the folder was deleted, the app comes forward and the island tells you.
+
+The first jump into iTerm2 or Terminal asks for Automation permission once (System Settings → Privacy & Security → Automation). If the tab has closed, the app comes forward instead; if Earpiece doesn't know where the session runs yet, the Overview opens. Under tmux you land on the terminal tab that is attached, not on a particular pane. Nothing is ever typed into a terminal.
 
 ## Marking sessions done
 
 If you've answered an agent somewhere Earpiece can't see, or you just want a session out of the way, click **Mark done** on its row in Overview. In the menu bar list, hover the row and click ✓. Earpiece won't speak a "needs you" line for that session if one is still queued, and the menu bar count goes down. Hover a row in Overview and click × to forget the session. It comes back the next time that agent sends something.
 
-## The floating card
+## The notch island
 
-Each time Earpiece speaks, a small dark card slides down just under the menu bar. It shows the agent's logo, its name, the project and the line, with a pulsing ring while the line plays. It never takes focus, it follows you across Spaces and full-screen apps, and clicks go through everything except the card. Hover over it to keep it open, and to get Stop and Dismiss buttons. Click it to open the app.
+Each time Earpiece speaks, a black island opens out of the MacBook notch for a few seconds. It shows the agent's logo, its name, the project and the line, with a pulsing ring while the line plays. Then it folds back into the notch: the agent's logo sits on the left of the notch and a waveform (while speaking) or a coloured dot sits on the right. Green is done, amber is needs you, red is an error. Click the notch to open it again. It stays open while the pointer is on it and folds back a moment after you move away. After a while (15 seconds, or 45 for "needs you" and errors) it settles back into the resting icon.
 
-It also shows when Earpiece stays silent because of quiet mode, quiet hours or a muted agent, with a small "Quiet" or "Muted" tag. When Earpiece is Off, nothing shows. You can turn the card off, or preview it, under General.
+Between lines the island rests in the notch as a small icon. The Earpiece mark and the number of running agents sit on the left of the notch, and one dot sits on the right: green when something is working, amber pulsing when an agent needs you, red on an error and grey when nothing is running. It is dimmer when Earpiece is Off or Quiet. Click it for the list of agents: everything working, waiting or in error, plus anything that finished in the last 30 minutes, with the ones that need you first. Each row shows the agent, project, status, last line and how long ago. Click a row to go to that agent's window, the same way a click on a line does. The list also has On / Quiet / Off and **Open dashboard**. Click anywhere outside it, or move the pointer away, and it folds back. It sits on the screen with the notch (or the main screen), and moves to the screen you're on when a line arrives. Set **Notch icon** under General to "Only on updates" if you'd rather keep the notch empty between lines.
 
-With **Answer from the card** on (General), the card can also carry a question: Allow / Deny for a tool request, or a reply box when the agent ended on a question. It still never takes the keyboard until you click into the reply box, and the buttons stay disabled for the first moment so a stray click can't approve anything. See [answer-from-card.md](answer-from-card.md).
+Screens without a notch (an external display, older MacBooks) get the same island as a flat-topped pill at the top centre. If your notch isn't picked up, set **Notch** under General to "Always use the notch" or "No notch".
+
+The island never takes focus, it follows you across Spaces and full-screen apps, Mission Control leaves it out, and clicks go through everything except the island itself.
+
+It also shows when Earpiece stays silent because of quiet mode, quiet hours or a muted agent, with a small "Quiet" or "Muted" tag. In Quiet nothing is spoken or chimed at all, but every line still pops out of the notch; "needs you" stays amber and errors stay red. When Earpiece is Off, no lines show (the resting icon stays, dimmed). You can turn the card off, which also removes the icon, or preview it, under General.
+
+With **Answer from the card** on (General), the island can also carry a question. It doesn't open by itself for a question: it turns amber and pulses in the notch, with a count when more than one is waiting. Click it to see Allow / Deny for a tool request, or a reply box when the agent ended on a question. It still never takes the keyboard until you click into the reply box, and the buttons stay disabled for the first moment after it opens, so a stray click can't approve anything. See [answer-from-card.md](answer-from-card.md).
 
 The core writes the last line to `~/.earpiece/card.json`, which the app watches. That way lines spoken by a background worker (when the app wasn't the hub) show up as well.
 
@@ -84,6 +105,10 @@ npm run dist:arm64   # Apple silicon only, faster
 
 Releases are built by `.github/workflows/app-release.yml` whenever an `app-v*` tag is pushed.
 
-## Not in this version
+## Updates
 
-- Auto-update. macOS only installs updates for Developer ID signed apps, so **Check for updates** in General links to the releases page instead.
+Earpiece checks GitHub for a newer release a few seconds after it starts and every six hours after that, or when you click **Check for updates** under General. When there is one, a banner appears at the top of Overview and under General → About. Click **Update** and Earpiece downloads the new zip, checks its size and SHA-256 against the release, unpacks it, checks that it is Earpiece at the expected version with an intact signature, then quits, puts the new copy where the old one was and opens it. Your settings, keys and hooks stay where they are. If anything fails, the old copy is put back and opened.
+
+The banner offers **Download** instead (the disk image, to drag to Applications yourself) when Earpiece can't replace itself: it is running from the disk image or from a temporary copy macOS made because it was never moved to Applications, its folder isn't writable, or the release has no checksum. Drafts and pre-releases are ignored.
+
+Because the app is not Developer ID signed, macOS may ask again for permissions you gave the old copy, such as Automation.

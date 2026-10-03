@@ -39,7 +39,10 @@
       "identity": "-",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "extendInfo": { "NSHumanReadableCopyright": "MIT License" }
+      "extendInfo": {
+        "NSHumanReadableCopyright": "MIT License",
+        "NSAppleEventsUsageDescription": "Earpiece brings forward the iTerm2 or Terminal tab your agent is running in when you click its card."
+      }
     },
     "dmg": { "sign": false, "title": "Earpiece" },
     "publish": null

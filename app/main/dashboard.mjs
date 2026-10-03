@@ -123,7 +123,7 @@ export function friendlyLog(lines, redact = (s) => s) {
 
 // ---------- dashboard ----------
 
-export function createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect, disconnect, refresh, prefs }) {
+export function createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect, disconnect, refresh, prefs, updater }) {
   const voiceCache = new Map();
   let sayVoices = null;
 
@@ -217,7 +217,7 @@ export function createDashboard({ app, dialog, shell, lib, core, state, hookStat
       agents: agents(),
       keys: keyStatus(),
       stats: stats(),
-      prefs: { showInDock: prefs.get().showInDock !== false, showCard: prefs.get().showCard !== false, answerFromCard: lib.config().answerFromCard === true, openAtLogin: app.getLoginItemSettings().openAtLogin },
+      prefs: { showInDock: prefs.get().showInDock !== false, showCard: prefs.get().showCard !== false, notch: prefs.get().notch || "auto", notchIcon: prefs.get().notchIcon === "updates" ? "updates" : "always", answerFromCard: lib.config().answerFromCard === true, shareStats: prefs.get().shareStats !== false, openAtLogin: app.getLoginItemSettings().openAtLogin },
       engines: listEngines().map((e) => ({ id: e.id, label: e.label || e.id, keyName: e.keyName || null })),
       languages: [["en", "English"], ["hinglish", "Hinglish"], ...Object.entries(LANG_NAMES)],
       openaiVoices: OPENAI_VOICES,
@@ -431,24 +431,6 @@ export function createDashboard({ app, dialog, shell, lib, core, state, hookStat
     return keyStatus();
   }
 
-  // ----- updates -----
-
-  async function checkUpdate() {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=20`, {
-      headers: { Accept: "application/vnd.github+json" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) throw bad(`GitHub said ${res.status}`);
-    const rel = (await res.json()).find((r) => !r.draft && /^app-v\d/.test(r.tag_name));
-    const current = app.getVersion();
-    if (!rel) return { current, latest: null, newer: false };
-    const latest = rel.tag_name.replace(/^app-v/, "");
-    const num = (v) => v.split(/[.-]/).slice(0, 3).map((x) => parseInt(x, 10) || 0);
-    const [a, b] = [num(latest), num(current)];
-    const newer = a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
-    return { current, latest, newer: newer > 0, url: rel.html_url };
-  }
-
   const OPENABLE = {
     log: () => lib.P.log,
     config: () => lib.P.config,
@@ -492,7 +474,11 @@ export function createDashboard({ app, dialog, shell, lib, core, state, hookStat
       case "setPref":
         return prefs.set(a.key, a.value);
       case "checkUpdate":
-        return checkUpdate();
+        return updater.check();
+      case "installUpdate":
+        return updater.install();
+      case "downloadUpdate":
+        return updater.openDownload();
       case "openUrl":
         if (a.url !== `https://github.com/${REPO}/releases` && !String(a.url).startsWith(`https://github.com/${REPO}/releases/`)) throw bad("not allowed");
         return shell.openExternal(a.url);

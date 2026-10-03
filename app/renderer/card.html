@@ -7,36 +7,77 @@
   <link rel="stylesheet" href="card.css" />
 </head>
 <body>
-  <div class="card" id="card" role="status" aria-live="polite">
-    <div class="avatar" id="avatar"><span class="ring"></span></div>
-    <div class="text">
-      <div class="meta"><b id="who"></b><span id="project"></span><span class="chip" id="chip" hidden></span></div>
-      <p class="line" id="line"></p>
+  <!-- The island lives in the notch (or a flat-topped pill at the top centre when there is none).
+       At rest it is the Earpiece mark, a count and a status dot either side of the notch; a click
+       drops down the list of agents. A line peeks it open for a moment, then folds it back. -->
+  <div class="island" id="card" role="status" aria-live="polite" data-view="gone">
+    <span class="shoulder left" aria-hidden="true"></span><span class="shoulder right" aria-hidden="true"></span>
+
+    <div class="clip">
+    <div class="rest" id="rest">
+      <span class="wing left"><span class="rest-mark" id="restMark"></span><b class="rest-count" id="restCount"></b></span>
+      <span class="gap" aria-hidden="true"></span>
+      <span class="wing right"><span class="rest-dot" aria-hidden="true"></span></span>
     </div>
-    <div class="side">
-      <span class="wave" id="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-      <button class="btn" id="stop" title="Stop talking" aria-label="Stop talking"><svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1.5" /></svg></button>
-      <button class="btn" id="close" title="Dismiss" aria-label="Dismiss"><svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" /></svg></button>
-    </div>
-    <div class="ask" id="ask" hidden>
-      <pre class="detail" id="detail" hidden></pre>
-      <p class="why" id="why" hidden></p>
-      <p class="why" id="rule" hidden></p>
-      <div class="choices" id="choices">
-        <button class="act allow" id="allow">Allow</button>
-        <button class="act always" id="always" hidden>Always allow</button>
-        <button class="act deny" id="deny">Deny</button>
-        <button class="act terminal" id="terminal" title="Leave it to the terminal prompt">In terminal</button>
-      </div>
-      <div class="reply" id="reply" hidden>
-        <textarea id="replyText" rows="2" maxlength="4000" spellcheck="false"></textarea>
-        <div class="row">
-          <button class="act terminal" id="replyTerminal" title="Leave it to the terminal">In terminal</button>
-          <button class="act allow" id="send">Send</button>
+
+    <div class="agents" id="agents">
+      <div class="agents-head">
+        <b>Agents</b><span class="sub" id="agentsSub"></span>
+        <div class="modes" id="modes" role="group" aria-label="Earpiece mode">
+          <button data-mode="on" title="Read lines aloud">On</button>
+          <button data-mode="quiet" title="Only “needs you” lines, for an hour">Quiet</button>
+          <button data-mode="off" title="Nothing is read aloud">Off</button>
         </div>
       </div>
-      <p class="err" id="askErr" hidden></p>
-      <div class="timer" aria-hidden="true"><i id="timerBar"></i></div>
+      <ul class="rows" id="agentRows"></ul>
+      <p class="empty" id="agentsEmpty">No agents running. They show up here as soon as one starts.</p>
+      <div class="agents-foot"><span class="more" id="agentsMore"></span><button class="link" id="openDash">Open dashboard</button></div>
+    </div>
+
+    <div class="mini" id="mini">
+      <span class="wing left"><span class="mini-logo" id="miniLogo"></span><b class="mini-name" id="miniName"></b></span>
+      <span class="gap" aria-hidden="true"></span>
+      <span class="wing right">
+        <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="dot" aria-hidden="true"></span>
+        <span class="count" id="miniCount" hidden></span>
+      </span>
+    </div>
+
+    <div class="full" id="full">
+      <div class="head">
+        <div class="avatar" id="avatar"><span class="ring"></span></div>
+        <div class="text">
+          <div class="meta"><b id="who"></b><span id="project"></span><span class="chip" id="chip" hidden></span></div>
+          <p class="line" id="line"></p>
+        </div>
+        <div class="side">
+          <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+          <button class="btn" id="stop" title="Stop talking" aria-label="Stop talking"><svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1.5" /></svg></button>
+          <button class="btn" id="close" title="Dismiss" aria-label="Dismiss"><svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" /></svg></button>
+        </div>
+      </div>
+      <div class="qa" id="ask" hidden>
+        <pre class="detail" id="detail" hidden></pre>
+        <p class="why" id="why" hidden></p>
+        <p class="why" id="rule" hidden></p>
+        <div class="choices" id="choices">
+          <button class="act allow" id="allow">Allow</button>
+          <button class="act always" id="always" hidden>Always allow</button>
+          <button class="act deny" id="deny">Deny</button>
+          <button class="act terminal" id="terminal" title="Answer at the terminal prompt instead, and go there">In terminal</button>
+        </div>
+        <div class="reply" id="reply" hidden>
+          <textarea id="replyText" rows="2" maxlength="4000" spellcheck="false"></textarea>
+          <div class="row">
+            <button class="act terminal" id="replyTerminal" title="Answer in the terminal instead, and go there">In terminal</button>
+            <button class="act allow" id="send">Send</button>
+          </div>
+        </div>
+        <p class="err" id="askErr" hidden></p>
+        <div class="timer" aria-hidden="true"><i id="timerBar"></i></div>
+      </div>
+    </div>
     </div>
   </div>
   <script src="logos.js"></script>

@@ -15,6 +15,7 @@
 import { execFile } from "node:child_process";
 import { now } from "../util.mjs";
 import { getSession, updateSession } from "./sessions.mjs";
+import { EDITORS } from "./editors.mjs";
 
 export const HEADER = "x-earpiece-origin";
 const TTL_MS = 10 * 60_000;
@@ -30,9 +31,8 @@ export const TERMINALS = [
   { id: "kitty", name: "kitty", bundle: "net.kovidgoyal.kitty", term: ["kitty"], names: [/^kitty$/i] },
   { id: "wezterm", name: "WezTerm", bundle: "com.github.wez.wezterm", term: ["WezTerm"], names: [/^wezterm/i] },
   { id: "alacritty", name: "Alacritty", bundle: "org.alacritty", term: ["alacritty"], names: [/^alacritty/i] },
-  { id: "cursor", name: "Cursor", bundle: "com.todesktop.230313mzl4w4u92", term: [], names: [/^cursor/i], editor: true },
-  { id: "windsurf", name: "Windsurf", bundle: "com.exafunction.windsurf", term: [], names: [/^windsurf/i], editor: true },
-  { id: "vscode", name: "VS Code", bundle: "com.microsoft.VSCode", term: ["vscode"], names: [/^visual studio code/i, /^code$/i], editor: true },
+  // Cursor, VS Code and the other editors come from EDITORS (editors.mjs).
+  ...EDITORS.map((e) => ({ id: e.id, name: e.name, bundle: e.bundle, term: e.term || [], names: e.names, editor: true })),
   { id: "codex-app", name: "Codex app", bundle: null, term: [], names: [/^codex/i] },
   { id: "claude-app", name: "Claude app", bundle: null, term: [], names: [/^claude/i] },
 ];
@@ -137,6 +137,9 @@ export function walkUp(table, start) {
 }
 
 /** "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/…" → the outer app. */
+// Keep the .app path so a click can bring forward apps we have no bundle id for (ChatGPT, …).
+const withPath = (app, gui) => (app ? { ...app, path: gui.path } : app);
+
 export function appOf(cmd) {
   const m = /^(.*?\/([^\/]+)\.app)\/Contents\//.exec(cmd || "");
   return m ? { path: m[1], name: m[2] } : null;
@@ -206,7 +209,7 @@ export async function resolveOrigin(raw, { agent = "", run: runCmd = run } = {})
   let tty = agentProc?.tty || chain.find((p) => p.tty)?.tty || null;
   const gui = chain.map((p) => appOf(p.cmd)).find(Boolean) || null;
 
-  let app = gui ? classifyApp({ appName: gui.name, bundle: raw.bundle, term: raw.term, appHint: raw.appHint }) : null;
+  let app = gui ? withPath(classifyApp({ appName: gui.name, bundle: raw.bundle, term: raw.term, appHint: raw.appHint }), gui) : null;
   let tabTty = tty;
   let tmux = null;
 
@@ -233,7 +236,7 @@ export async function resolveOrigin(raw, { agent = "", run: runCmd = run } = {})
         tmux.clients = clients.length;
         tabTty = client.tty;
         const clientApp = walkUp(table, client.pid).map((p) => appOf(p.cmd)).find(Boolean);
-        app = clientApp ? classifyApp({ appName: clientApp.name }) : null;
+        app = clientApp ? withPath(classifyApp({ appName: clientApp.name }), clientApp) : null;
       } else (app = null, detached = true); // detached tmux: the env describes the terminal that started it, long gone
     } catch {
       complete = false;

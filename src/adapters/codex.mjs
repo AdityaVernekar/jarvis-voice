@@ -149,19 +149,34 @@ export function rewriteToml(text, { ours, uninstall = false, chain = false, save
   return { text: out.join("\n").replace(/\n*$/, "\n"), chainSaved, restored, changed: true };
 }
 
+// The Codex app runs a hidden turn to title each thread, and notify reports it like any other:
+// its last message is just {"title":"…"}.
+export function isTitleTurn(text) {
+  const t = String(text || "").trim();
+  if (!t.startsWith("{") || !t.endsWith("}") || t.length > 400) return false;
+  try {
+    const o = JSON.parse(t);
+    return Boolean(o) && !Array.isArray(o) && Object.keys(o).length === 1 && typeof o.title === "string";
+  } catch {
+    return false;
+  }
+}
+
 export default {
   id: "codex",
   name: "Codex",
 
   toEvents(p) {
     if (p.type && p.type !== "agent-turn-complete") return [];
+    const text = p["last-assistant-message"] || p.last_assistant_message || "";
+    if (isTitleTurn(text)) return []; // Codex naming the thread, not a turn you need to hear about
     return [
       {
         agent: "codex",
         session: p["thread-id"] || p.thread_id || p["turn-id"] || "codex",
         cwd: p.cwd || process.cwd(),
         type: "turn_end",
-        text: p["last-assistant-message"] || p.last_assistant_message || "",
+        text,
       },
     ];
   },

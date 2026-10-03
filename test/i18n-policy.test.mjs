@@ -30,7 +30,9 @@ test("modes gate kinds", () => {
   setMode("quiet", 10);
   assert.equal(currentMode(), "quiet");
   assert.equal(policyBlock("done", cfg), "mode_quiet");
-  assert.equal(policyBlock("needs_input", cfg), null);
+  // Quiet is silent for every kind; the card still shows them.
+  assert.equal(policyBlock("needs_input", cfg), "mode_quiet");
+  assert.equal(policyBlock("error", cfg), "mode_quiet");
   setMode("off");
   assert.equal(policyBlock("needs_input", cfg), "mode_off");
   setMode("on");

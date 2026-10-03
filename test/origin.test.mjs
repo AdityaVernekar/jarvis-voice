@@ -84,10 +84,10 @@ test("classifyApp: process tree beats bundle id beats TERM_PROGRAM", () => {
 
 const PS_ITERM = `
   100     1 ??       /Applications/iTerm.app/Contents/MacOS/iTerm2
-  200   100 ttys004  login -fp adi
+  200   100 ttys004  login -fp me
   201   200 ttys004  -zsh
   300   201 ttys004  claude --resume
-  310   300 ttys004  sh /Users/adi/.earpiece/bin/earpiece-hook claude-code
+  310   300 ttys004  sh /Users/me/.earpiece/bin/earpiece-hook claude-code
 `;
 
 test("parsePs, walkUp and appOf", () => {
@@ -100,7 +100,7 @@ test("parsePs, walkUp and appOf", () => {
   assert.deepEqual(O.walkUp(new Map([[5, { pid: 5, ppid: 6, cmd: "" }], [6, { pid: 6, ppid: 5, cmd: "" }]]), 5).map((p) => p.pid), [5, 6], "a loop ends");
   assert.deepEqual(O.walkUp(t, 999), []);
   assert.deepEqual(O.appOf("/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper (Plugin)"), { path: "/Applications/Visual Studio Code.app", name: "Visual Studio Code" });
-  assert.equal(O.appOf("/usr/bin/login -fp adi"), null);
+  assert.equal(O.appOf("/usr/bin/login -fp me"), null);
 });
 
 test("agentMatcher finds the agent's own process, not a lookalike", () => {
@@ -166,7 +166,7 @@ test("Cursor and VS Code are told apart, and jump to the window", async () => {
 
 const TMUX_PS = `
   100     1 ??       /Applications/Ghostty.app/Contents/MacOS/ghostty
-  110   100 ttys001  /usr/bin/login -flp adi /bin/zsh
+  110   100 ttys001  /usr/bin/login -flp me /bin/zsh
   120   110 ttys001  tmux attach
   900     1 ??       tmux: server
   910   900 ttys012  -zsh
@@ -406,12 +406,12 @@ test("a shell wrapper is not mistaken for the agent, and the npm package path ma
   const ps = `  100     1 ??       /Applications/Ghostty.app/Contents/MacOS/ghostty
   200   100 ttys003  -zsh
   300   200 ttys003  codex
-  310   300 ttys003  /bin/sh -c /Users/adi/.earpiece/bin/earpiece-hook codex {"type":"agent-turn-complete"}
+  310   300 ttys003  /bin/sh -c /Users/me/.earpiece/bin/earpiece-hook codex {"type":"agent-turn-complete"}
 `;
   const o = await O.resolveOrigin(O.parseOriginHeader(header({ ppid: 310 })), { agent: "codex", run: fakeRun({ ps }) });
   assert.equal(o.pid, 300);
   assert.ok(O.agentMatcher("claude-code").test("node /opt/lib/node_modules/@anthropic-ai/claude-code/cli.js --resume"));
-  assert.ok(!O.agentMatcher("claude-code").test("/Users/adi/claude-codex-notes/x"));
+  assert.ok(!O.agentMatcher("claude-code").test("/Users/me/claude-codex-notes/x"));
 });
 
 test("TMUX socket paths with commas survive", () => {

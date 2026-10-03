@@ -1,33 +1,155 @@
-/* The floating card: a dark island just under the menu bar, the same in light and dark mode. */
+/* The notch island. Pure black so it fuses with the MacBook notch; on displays without one it is
+   a flat-topped pill hanging from the top edge (a "virtual notch"). Sizes come from card.js as
+   CSS variables: --w/--h (current island size), --notch-w/--notch-h (the notch), --inset (how far
+   below the top edge content can start). */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
 body {
+  --notch-w: 0px; --notch-h: 32px; --inset: 8px; --w: 200px; --h: 0px;
   font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   color: #f5f5f7; -webkit-user-select: none; user-select: none; cursor: default;
-  display: flex; justify-content: center; align-items: flex-start; padding: 6px 14px 22px;
 }
-.card {
+
+.island {
   --accent: #4c8dff;
-  pointer-events: auto; width: 100%; display: flex; align-items: center; gap: 12px;
-  padding: 10px 12px 10px 10px; border-radius: 22px; background: rgba(14, 14, 16, 0.94);
-  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 10px 30px rgba(0, 0, 0, 0.35);
-  transform-origin: 50% 0; opacity: 0; transform: translateY(-10px) scale(0.72, 0.6);
-  transition: opacity 0.22s ease, transform 0.34s cubic-bezier(0.2, 0.9, 0.25, 1.15);
+  /* A damped spring (about 2% overshoot) for growing out of the notch; folding back uses a plain
+     ease-out so the wings never dip inside the notch and bounce back out. */
+  --spring: linear(0, 0.0799, 0.2511, 0.4432, 0.618, 0.7593, 0.8638, 0.935, 0.9797, 1.0047, 1.0164, 1.0199, 1.0187, 1.0155, 1.0117, 1.0081, 1.0052, 1.003, 1.0015, 1.0005, 1);
+  --fold: cubic-bezier(0.32, 0.72, 0, 1);
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%) translateZ(0);
+  width: var(--w); height: var(--h);
+  background: #000; border-radius: 0 0 var(--r, 14px) var(--r, 14px);
+  pointer-events: auto;
+  will-change: transform; /* its own layer: only the island repaints while it moves */
+  transition: width 0.5s var(--spring), height 0.5s var(--spring), border-radius 0.5s var(--spring), opacity 0.2s;
 }
-.card.in { opacity: 1; transform: none; }
-.card.out { opacity: 0; transform: translateY(-8px) scale(0.85, 0.7); transition-duration: 0.2s, 0.24s; transition-timing-function: ease-in; }
-.card.needs_input { --accent: #ffb020; }
-.card.error { --accent: #ff5a4e; }
-.card.done { --accent: #3ccf73; }
-.card.silent { --accent: #8e8e93; }
+.island[data-motion="shrink"]:not([data-view="gone"]) { transition: width 0.34s var(--fold), height 0.34s var(--fold), border-radius 0.34s var(--fold), opacity 0.2s; }
+.island[data-view="gone"] { opacity: 0; pointer-events: none; transition-delay: 0s, 0s, 0s, 0s, 0.28s; transition-duration: 0.34s, 0.34s, 0.34s, 0.3s, 0.12s; transition-timing-function: ease-in; }
+.island[data-view="mini"] { --r: 12px; }
+.island[data-view="rest"] { --r: 10px; }
+.island[data-view="list"] { --r: 26px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4); }
+.island[data-view="peek"], .island[data-view="open"] { --r: 26px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4); }
+
+/* Concave corners where the island meets the top of the screen, like the notch itself. */
+.shoulder { position: absolute; top: 0; width: 10px; height: 10px; pointer-events: none; }
+.shoulder.left { left: -10px; background: radial-gradient(circle at 0 100%, transparent 9.5px, #000 10px); }
+.shoulder.right { right: -10px; background: radial-gradient(circle at 100% 100%, transparent 9.5px, #000 10px); }
+
+.clip { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
+
+.island.needs_input { --accent: #ffb020; }
+.island.error { --accent: #ff5a4e; }
+.island.done { --accent: #3ccf73; }
+.island.silent:not(.needs_input):not(.error) { --accent: #8e8e93; }
+
+/* ----- collapsed: two wings either side of the notch ----- */
+.mini {
+  position: absolute; top: 0; left: 0; right: 0; height: var(--notch-h);
+  display: grid; grid-template-columns: 1fr var(--notch-w) 1fr; align-items: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.16s; /* clicks land on the island itself */
+}
+.island[data-view="mini"] .mini { opacity: 1; transition: opacity 0.22s 0.16s; }
+.wing { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.wing.left { justify-content: center; }
+.wing.right { justify-content: center; }
+.mini-logo { width: 18px; height: 18px; display: grid; place-items: center; color: #f5f5f7; flex: none; }
+.mini-logo .logo { width: 16px; height: 16px; }
+.mini-name { display: none; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.count { font-size: 11px; font-weight: 600; color: var(--accent); }
+.island.asking .dot { animation: pulse 1.3s ease-in-out infinite; }
+.island.asking[data-view="mini"] { animation: glow 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: scale(0.6); opacity: 0.55; } }
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 0 0.5px rgba(255, 176, 32, 0.25), 0 4px 14px rgba(255, 176, 32, 0.12); }
+  50% { box-shadow: 0 0 0 1px rgba(255, 176, 32, 0.6), 0 6px 22px rgba(255, 176, 32, 0.35); }
+}
+
+/* No notch: one pill, logo + agent name on the left, status on the right. */
+body.virtual .mini { grid-template-columns: 1fr auto; padding: 0 14px 0 12px; }
+body.virtual .gap { display: none; }
+body.virtual .wing.left { justify-content: flex-start; }
+body.virtual .mini-name { display: block; }
+
+/* ----- at rest: the Earpiece mark and a count on the left wing, one status dot on the right ----- */
+.rest {
+  position: absolute; top: 0; left: 0; right: 0; height: var(--notch-h);
+  display: grid; grid-template-columns: 1fr var(--notch-w) 1fr; align-items: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.14s;
+}
+.island[data-view="rest"] .rest { opacity: 1; transition: opacity 0.2s 0.14s; }
+.island[data-view="rest"] { cursor: pointer; }
+.rest .wing { gap: 4px; }
+.rest-mark { width: 16px; height: 16px; display: grid; place-items: center; color: #f5f5f7; flex: none; }
+.rest-mark .logo { width: 15px; height: 15px; }
+.rest-count { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; color: #e5e5ea; }
+.rest-dot { width: 7px; height: 7px; border-radius: 50%; background: #636366; flex: none; transition: background 0.2s; }
+.island[data-tone="working"] .rest-dot { background: #3ccf73; }
+.island[data-tone="error"] .rest-dot { background: #ff5a4e; }
+.island[data-tone="waiting"] .rest-dot { background: #ffb020; animation: pulse 1.3s ease-in-out infinite; }
+/* Off or quiet: still there, just dimmer, so you can tell at a glance. */
+.island[data-mode="off"] .rest .wing, .island[data-mode="quiet"] .rest .wing { opacity: 0.5; }
+body.virtual .rest { grid-template-columns: auto auto; justify-content: center; gap: 8px; padding: 0 10px; }
+body.virtual .rest .gap { display: none; }
+
+/* ----- the agents list, dropped down from the resting icon ----- */
+.agents {
+  position: absolute; top: 0; left: 0; width: var(--full-w, 460px);
+  padding: calc(var(--inset) + 8px) 12px 10px;
+  opacity: 0; transform: translateY(-6px) scale(0.98); transform-origin: 50% 0; pointer-events: none; transition: opacity 0.1s, transform 0.1s;
+}
+.island[data-view="list"] .agents { opacity: 1; transform: none; pointer-events: auto; transition: opacity 0.22s 0.12s, transform 0.4s 0.08s var(--fold); }
+.agents-head { display: flex; align-items: center; gap: 8px; padding: 0 4px 8px; }
+.agents-head b { font-size: 13px; font-weight: 600; }
+.agents-head .sub { font-size: 11.5px; color: #a1a1a6; }
+.modes { margin-left: auto; display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: rgba(255, 255, 255, 0.08); }
+.modes button { border: 0; border-radius: 7px; padding: 2px 9px; font: inherit; font-size: 11.5px; color: #c7c7cc; background: transparent; }
+.modes button:hover { background: rgba(255, 255, 255, 0.1); }
+.modes button.on { background: rgba(255, 255, 255, 0.2); color: #fff; font-weight: 600; }
+.rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rows li { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 12px; cursor: pointer; }
+.rows li:hover { background: rgba(255, 255, 255, 0.08); }
+.rows .av { width: 28px; height: 28px; flex: none; border-radius: 50%; display: grid; place-items: center; background: #1c1c1f; color: #f5f5f7; position: relative; }
+.rows .av .logo { width: 15px; height: 15px; }
+.rows .av::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid #000; background: #636366; }
+.rows li.working .av::after { background: #3ccf73; }
+.rows li.waiting .av::after { background: #ffb020; }
+.rows li.error .av::after { background: #ff5a4e; }
+.rows li.done .av::after { background: #4c8dff; }
+.rows .tx { flex: 1; min-width: 0; }
+.rows .mt { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #a1a1a6; white-space: nowrap; overflow: hidden; }
+.rows .mt b { color: #f5f5f7; font-weight: 600; }
+.rows .mt .pj { overflow: hidden; text-overflow: ellipsis; }
+.rows .mt .pj:not(:empty)::before { content: "·"; margin-right: 6px; }
+.rows .mt .age { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; }
+.rows .st { font-size: 10.5px; padding: 0 6px; border-radius: 8px; background: rgba(255, 255, 255, 0.12); color: #c7c7cc; flex: none; }
+.rows li.waiting .st { background: rgba(255, 176, 32, 0.2); color: #ffc85a; }
+.rows li.error .st { background: rgba(255, 90, 78, 0.2); color: #ff8a80; }
+.rows li.working .st { background: rgba(60, 207, 115, 0.18); color: #6fe09a; }
+.rows .ln { margin: 1px 0 0; font-size: 12.5px; line-height: 1.3; color: #e5e5ea; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.empty { margin: 4px 4px 8px; font-size: 12.5px; color: #a1a1a6; }
+.empty[hidden] { display: none; }
+.agents-foot { display: flex; align-items: center; padding: 6px 4px 0; font-size: 11.5px; color: #a1a1a6; }
+.link { margin-left: auto; border: 0; padding: 2px 4px; background: transparent; font: inherit; color: #8fb5ff; }
+.link:hover { color: #b5ceff; text-decoration: underline; }
+
+/* ----- open: the full card, grown out of the notch ----- */
+.full {
+  position: absolute; top: 0; left: 0; width: var(--full-w, 460px);
+  padding: calc(var(--inset) + 6px) 14px 14px 12px;
+  opacity: 0; transform: translateY(-6px) scale(0.98); transform-origin: 50% 0; pointer-events: none; transition: opacity 0.1s, transform 0.1s;
+}
+.island[data-view="peek"] .full, .island[data-view="open"] .full { opacity: 1; transform: none; pointer-events: auto; transition: opacity 0.22s 0.12s, transform 0.4s 0.08s var(--fold); }
+.head { display: flex; align-items: center; gap: 12px; }
+.island:not(.asking) .head { cursor: pointer; }
 
 .avatar {
   position: relative; width: 38px; height: 38px; flex: none; border-radius: 50%;
-  display: grid; place-items: center; background: #26262a; color: #f5f5f7;
+  display: grid; place-items: center; background: #1c1c1f; color: #f5f5f7;
 }
 .avatar .logo { width: 20px; height: 20px; position: relative; z-index: 1; }
 .ring { position: absolute; inset: -3px; border-radius: 50%; box-shadow: 0 0 0 2px var(--accent); opacity: 0.9; }
-.card.speaking .ring { animation: ring 1.4s ease-out infinite; }
+.island.speaking .ring { animation: ring 1.4s ease-out infinite; }
 @keyframes ring { 0% { transform: scale(0.94); opacity: 0.95; } 100% { transform: scale(1.22); opacity: 0; } }
 
 .text { flex: 1; min-width: 0; }
@@ -35,42 +157,40 @@ body {
 .meta b { color: #f5f5f7; font-weight: 600; }
 .meta #project:not(:empty)::before { content: "·"; margin-right: 6px; }
 #project { overflow: hidden; text-overflow: ellipsis; }
-.chip { font-size: 10.5px; padding: 0 6px; border-radius: 8px; background: rgba(255, 255, 255, 0.1); color: #c7c7cc; flex: none; }
+.chip { font-size: 10.5px; padding: 0 6px; border-radius: 8px; background: rgba(255, 255, 255, 0.12); color: #c7c7cc; flex: none; }
 .line {
   margin: 2px 0 0; font-size: 13.5px; line-height: 1.35; color: #f5f5f7;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.card.silent .line { color: #d1d1d6; }
+.island[data-view="open"] .line { -webkit-line-clamp: 5; }
+.island.silent .line { color: #d1d1d6; }
 
 .side { display: flex; align-items: center; gap: 6px; flex: none; }
-.wave { display: inline-flex; align-items: center; gap: 2px; height: 16px; margin-right: 2px; }
+.wave { display: inline-flex; align-items: center; gap: 2px; height: 16px; }
 .wave i { width: 2.5px; height: 30%; border-radius: 2px; background: var(--accent); opacity: 0.5; }
-.card.speaking .wave i { opacity: 1; animation: bounce 0.9s ease-in-out infinite; }
+.island.speaking .wave i { opacity: 1; animation: bounce 0.9s ease-in-out infinite; }
 .wave i:nth-child(2), .wave i:nth-child(4) { height: 60%; }
 .wave i:nth-child(3) { height: 100%; }
-.card.speaking .wave i:nth-child(2) { animation-delay: 0.1s; }
-.card.speaking .wave i:nth-child(3) { animation-delay: 0.2s; }
-.card.speaking .wave i:nth-child(4) { animation-delay: 0.3s; }
-.card.speaking .wave i:nth-child(5) { animation-delay: 0.4s; }
-.card:not(.speaking) .wave { display: none; }
-@keyframes bounce { 50% { transform: scaleY(0.35); } }
+.island.speaking .wave i:nth-child(2) { animation-delay: 0.1s; }
+.island.speaking .wave i:nth-child(3) { animation-delay: 0.2s; }
+.island.speaking .wave i:nth-child(4) { animation-delay: 0.3s; }
+.island.speaking .wave i:nth-child(5) { animation-delay: 0.4s; }
+.island:not(.speaking) .wave { display: none; }
+.island.speaking .dot { display: none; }
 
-.btn { width: 22px; height: 22px; border: 0; border-radius: 50%; padding: 0; background: rgba(255, 255, 255, 0.1); color: #f5f5f7; display: grid; place-items: center; opacity: 0; transition: opacity 0.15s; }
+.btn { width: 22px; height: 22px; border: 0; border-radius: 50%; padding: 0; background: rgba(255, 255, 255, 0.12); color: #f5f5f7; display: grid; place-items: center; opacity: 0; transition: opacity 0.15s; }
 .btn svg { width: 10px; height: 10px; fill: currentColor; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
-.btn:hover { background: rgba(255, 255, 255, 0.2); }
-.card:hover .btn { opacity: 1; }
-.card:not(.speaking) #stop { display: none; }
-.card:hover { background: rgba(22, 22, 26, 0.96); }
+.btn:hover { background: rgba(255, 255, 255, 0.22); }
+.island:hover .btn, .island[data-view="open"] .btn { opacity: 1; }
+.island:not(.speaking) #stop { display: none; }
 
 /* ----- a question the agent is waiting on ----- */
-.card.asking { flex-wrap: wrap; align-content: flex-start; row-gap: 10px; }
-.card.asking .line { -webkit-line-clamp: 4; }
-.card.asking #stop { display: none; }
-.card.asking .btn { opacity: 1; }
-.ask { flex-basis: 100%; min-width: 0; padding: 0 2px 2px; display: flex; flex-direction: column; gap: 8px; }
-.ask[hidden], .ask [hidden] { display: none; }
+.island.asking #stop { display: none; }
+.island.asking .line { -webkit-line-clamp: 4; }
+.qa { margin-top: 10px; min-width: 0; padding: 0 2px 2px; display: flex; flex-direction: column; gap: 8px; }
+.qa[hidden], .qa [hidden] { display: none; }
 .detail {
-  margin: 0; max-height: 86px; overflow: auto; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.07);
+  margin: 0; max-height: 86px; overflow: auto; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.08);
   font: 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e5e5ea; white-space: pre-wrap; word-break: break-all;
   -webkit-user-select: text; user-select: text;
 }
@@ -80,7 +200,7 @@ body {
 .reply .row { justify-content: flex-end; }
 .act {
   border: 0; border-radius: 10px; padding: 6px 14px; font: inherit; font-weight: 600; color: #f5f5f7;
-  background: rgba(255, 255, 255, 0.12); transition: background 0.12s, opacity 0.15s;
+  background: rgba(255, 255, 255, 0.13); transition: background 0.12s, opacity 0.15s;
 }
 .act:hover:not(:disabled) { background: rgba(255, 255, 255, 0.22); }
 .act:disabled { opacity: 0.4; }
@@ -91,7 +211,7 @@ body {
 .act.terminal { margin-left: auto; font-weight: 500; color: #c7c7cc; background: transparent; }
 .reply .row .terminal { margin-left: 0; margin-right: auto; }
 .reply textarea {
-  width: 100%; resize: none; border: 0; border-radius: 10px; padding: 8px 10px; background: rgba(255, 255, 255, 0.09);
+  width: 100%; resize: none; border: 0; border-radius: 10px; padding: 8px 10px; background: rgba(255, 255, 255, 0.1);
   color: #f5f5f7; font: inherit; outline: 1px solid rgba(255, 255, 255, 0.14);
   -webkit-user-select: text; user-select: text; cursor: text;
 }
@@ -100,6 +220,7 @@ body {
 .timer i { display: block; height: 100%; background: var(--accent); transform-origin: 0 50%; }
 
 @media (prefers-reduced-motion: reduce) {
-  .card, .card.out { transition: opacity 0.15s; transform: none; }
-  .card.speaking .ring, .card.speaking .wave i { animation: none; }
+  .island, .island[data-view="gone"], .island[data-motion="shrink"]:not([data-view="gone"]) { transition-duration: 0.12s; transition-timing-function: ease; }
+  .full, .agents { transform: none !important; }
+  .island.speaking .ring, .island.speaking .wave i, .island.asking .dot, .island.asking[data-view="mini"], .island[data-tone="waiting"] .rest-dot { animation: none; }
 }

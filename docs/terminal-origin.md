@@ -1,6 +1,6 @@
 # Where is each agent running?
 
-Earpiece works out, for every agent session, which terminal app it runs in, which tab (tty) and, under tmux, which pane. You can see it with `earpiece where` and on each session row in the Mac app. It is the groundwork for jumping back to the right window from the floating card.
+Earpiece works out, for every agent session, which terminal app it runs in, which tab (tty) and, under tmux, which pane. You can see it with `earpiece where` and on each session row in the Mac app. Clicking the card, or **Open** on a session row, uses it to take you back to that window.
 
 ```text
 $ earpiece where
@@ -33,10 +33,23 @@ Because every hook is a new shell with a new parent pid, a session is only looke
 | --- | --- |
 | iTerm2 | the tab, found by session id or tty |
 | Terminal.app | the tab, found by tty |
-| VS Code, Cursor, Windsurf | the window (editors can't tell terminals apart from outside) |
+| VS Code, Cursor, Windsurf, Insiders, VSCodium, Trae, Kiro, Void, Positron | the window (editors can't tell terminals apart from outside) |
 | Ghostty, Warp, kitty, WezTerm, Alacritty, others | the app only |
-| tmux inside any of the above | the pane is selected, then the client's terminal is brought forward |
+| tmux inside any of the above | the attached client's tab (the pane is not switched) |
+| Claude Desktop, the Codex app | the app |
+
+From a terminal, `earpiece jump` goes to the most recent session (`earpiece jump 2` for the second in `earpiece where`, `--agent codex` to pick by agent). `--dry-run` prints the steps it would try without running them. Each step falls back to the next: the exact tab, then the app. If Automation permission was refused, it says so; turn it back on under System Settings → Privacy & Security → Automation.
+
+### Which editor window
+
+An editor is told what to open with `open -b <bundle> <path>`, and handing it a folder that no window has as its root opens a new window. So Earpiece first reads the editor's own record of its windows (`~/Library/Application Support/<editor>/User/globalStorage/storage.json` and `Backups/workspaces.json`, plus the roots of any `.code-workspace` file listed there) and picks:
+
+1. the window whose root holds the session's folder, the deepest root if several do, the most recent window on a tie;
+2. otherwise the folder itself if it is a repo root (it has `.git`);
+3. otherwise nothing: the editor comes forward without opening anything.
+
+Paths are compared after resolving symlinks, without case and trailing slashes. Remote windows are skipped. Editors are rows in `src/hub/editors.mjs`; each row names a family, and each family has one reader, so another VS Code-based editor is one row. `earpiece jump --dry-run` and `earpiece doctor` show the windows found.
 
 ## Privacy and safety
 
-Everything stays on your Mac. The origin is stored in `~/.earpiece/sessions/` and is never sent to a voice or summary API. Every value from the header is checked against a strict pattern before it is used, and values that don't look right are dropped. Jumping (when it lands) passes them to `osascript` as arguments, never as script text.
+Everything stays on your Mac. The origin is stored in `~/.earpiece/sessions/` and is never sent to a voice or summary API. Every value from the header is checked against a strict pattern before it is used, and values that don't look right are dropped. Jumping passes them to `osascript` as arguments, never as script text.

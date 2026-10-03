@@ -95,7 +95,7 @@ earpiece say "text" [--kind done|needs_input|error|info] [--provider id] [--lang
 earpiece voices [--gender female] [--accent indian] [--lang hi] [--std]
 earpiece voice <id> [--agent id]
 earpiece lang <en|hinglish|hi|ta|mr|es|…>
-earpiece quiet [minutes]     # only "needs you" pings, default 60 min
+earpiece quiet [minutes]     # no voice, updates still show on screen; default 60 min
 earpiece off [minutes]       # silence, default until `earpiece on`
 earpiece on
 earpiece stop                # stop talking now and drop every queued line
@@ -151,6 +151,10 @@ earpiece emit/run ──┘                └─► worker ─► summary ─�
 ```
 
 Hooks return within milliseconds. Transcript reads, LLM calls and audio all happen in a detached worker, so Earpiece never slows an agent down. Only one line plays at a time across all agents. [docs/architecture.md](docs/architecture.md) has the details, and [docs/engines.md](docs/engines.md) covers adding a voice engine.
+
+## Usage stats
+
+The Mac app sends anonymous usage stats a few times a day so we can tell how many people use Earpiece: a random install id (made on first launch, not tied to you or your Mac), the app version, the macOS version, the CPU architecture, your locale, and which agents are connected (for example `claude-code`, `codex`). It never sends code, prompts, summaries, project names, file paths or API keys, and the stats table has no IP address column (Supabase, which hosts it, keeps request logs with IPs for a short time). Turn it off under General → **Share anonymous usage stats**, or launch the app with `EARPIECE_TELEMETRY=0`. The `earpiece` CLI and dev builds (`npm start`) send nothing. The code is [`app/main/telemetry.mjs`](app/main/telemetry.mjs). Details in [SECURITY.md](SECURITY.md#usage-stats).
 
 ## Platform support
 

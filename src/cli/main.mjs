@@ -13,7 +13,9 @@ import { ingest, ingestEvent, runWorker } from "../hub/hub.mjs";
 import { startHubServer } from "../hub/server.mjs";
 import { stopSpeaking } from "../control.mjs";
 import { writeShim } from "../shim.mjs";
+import { cmdDoctor } from "./doctor.mjs";
 import { betterOrigin, describeOrigin, jumpPrecision, rawFromEnv, resolveOrigin } from "../hub/origin.mjs";
+import { jumpPlan, jumpTo, resolveTarget } from "../hub/jump.mjs";
 import { listSessions, updateSession } from "../hub/sessions.mjs";
 import { isKnownLang, LANG_NAMES, langLabel, phrase } from "../i18n.mjs";
 import { BIN, HOME, P, ROOT } from "../paths.mjs";
@@ -37,6 +39,7 @@ Setup
 Agents
   earpiece agents [--all] [--json]      every agent session Earpiece has seen, and its state
   earpiece where [--here] [--refresh]   which terminal, tab and tmux pane each agent runs in (--here: this shell)
+  earpiece jump [n] [--dry-run]         bring forward the window of the nth most recent session (default 1)
   earpiece emit --agent <id> --type <type> [--session s] [--project p] [--tool t] [--message m] [--wait] [text…]
                                         send an event from any tool (JSON on stdin also works);
                                         returns at once unless run in a terminal or with --wait
@@ -50,7 +53,7 @@ Voice
   earpiece lang <code>                  en | hinglish | hi | ta | mr | es | …
 
 Control
-  earpiece quiet [minutes]              only "needs you" pings (default 60 min)
+  earpiece quiet [minutes]              no voice, updates still show on screen (default 60 min)
   earpiece off [minutes]                silence everything (default: until \`on\`)
   earpiece on
   earpiece stop                         stop talking now and drop every queued line
@@ -61,6 +64,7 @@ Control
   earpiece answers on|off               approve/deny tool requests and reply to questions from the
                                         floating card (Claude Code, Codex; needs the app or \`serve\`)
   earpiece status
+  earpiece doctor                      check every hook and config points at this copy, the hub and keys
 
 Agent entry points (written by \`earpiece install\`)
   earpiece hook [adapter]               Claude Code hooks (payload on stdin)
@@ -233,6 +237,42 @@ function cmdAgents(rest) {
   const waiting = sessions.filter((s) => s.status === "waiting").length;
   const working = sessions.filter((s) => s.status === "working").length;
   console.log(`\n${working} working, ${waiting} waiting on you, ${sessions.length} total`);
+}
+
+const EDITOR_WHY = { window: "the window opened at this folder", "window-root": "the window whose root holds this folder", "repo-root": "this repo root" };
+
+// What a click on the card does, from the command line: handy to check each terminal setup.
+async function cmdJump(rest) {
+  const { flags, words } = parseFlags(rest, ["agent"]);
+  let sessions = listSessions({ sinceMs: 24 * 3600_000 });
+  if (flags.agent) sessions = sessions.filter((s) => s.agent === flags.agent);
+  const n = Math.max(Number(words[0]) || 1, 1);
+  const s = sessions[n - 1];
+  if (!s) {
+    process.exitCode = 1;
+    return console.error("earpiece: no such session in the last 24 h. See `earpiece agents`.");
+  }
+  const target = { agent: s.agent, origin: s.origin || null, cwd: s.cwd || null };
+  const label = `${agentConfig(config(), s.agent).label || getAdapter(s.agent).name} · ${s.project || projectName(s.cwd)}`;
+  if (flags["dry-run"]) {
+    const t = resolveTarget(target);
+    const steps = jumpPlan(t);
+    console.log(`${label}: ${steps.length ? steps.map((x) => `${x.how} (${x.precision}${x.why ? `, ${x.why}` : ""})`).join(", then ") : "nowhere to go"}`);
+    if (t.note === "folder-missing") console.log(`  the session's folder is gone: ${target.cwd}`);
+    if (t.editorWindows) {
+      console.log(`  folder: ${t.cwd || target.cwd || "unknown"}`);
+      console.log(`  editor windows found: ${t.editorWindows.length ? "" : "none"}`);
+      for (const w of t.editorWindows) console.log(`    ${w.open}${w.folders.length > 1 || w.folders[0] !== w.open ? ` (${w.folders.join(", ")})` : ""}`);
+      console.log(`  opens: ${t.editorTarget ? `${t.editorTarget.open} (${EDITOR_WHY[t.editorTarget.why] || t.editorTarget.why})` : "nothing, the editor just comes forward (no open window holds this folder)"}`);
+    }
+    return;
+  }
+  const r = await jumpTo(target);
+  if (r.ok) console.log(`${label}: opened the ${r.precision === "app" ? "app" : r.precision}${r.note === "folder-missing" ? " (the session's folder is gone)" : ""}`);
+  else {
+    process.exitCode = 1;
+    console.error(`earpiece: couldn't open ${label}${r.error ? `: ${r.error}` : ""}`);
+  }
 }
 
 // Which terminal is each agent in? `--here` shows what Earpiece sees from the shell you run it in,
@@ -531,6 +571,8 @@ export async function main(argv) {
       return cmdLang(rest);
     case "where":
       return cmdWhere(rest);
+    case "jump":
+      return cmdJump(rest);
     case "agents":
     case "ls":
       return cmdAgents(rest);
@@ -545,6 +587,8 @@ export async function main(argv) {
       return console.log("earpiece: on");
     case "status":
       return cmdStatus();
+    case "doctor":
+      return cmdDoctor();
     case "stop":
     case "flush":
       return cmdStop();

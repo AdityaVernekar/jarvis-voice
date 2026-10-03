@@ -31,6 +31,30 @@ contextBridge.exposeInMainWorld("earpiece", {
     ipcRenderer.on("card", h);
     return () => ipcRenderer.off("card", h);
   },
+  // The card window's screen: { notch, notchW, notchH }. Sent before each card is shown.
+  onGeom: (cb) => {
+    const h = (_e, g) => cb(g);
+    ipcRenderer.on("card-geom", h);
+    return () => ipcRenderer.off("card-geom", h);
+  },
+  // The resting icon: the agents list ({ rows, more, active, waiting, tone, mode, rest, now }) and
+  // whether the island rests in the notch between lines.
+  onAgents: (cb) => {
+    const h = (_e, a) => cb(a);
+    ipcRenderer.on("card-agents", h);
+    return () => ipcRenderer.off("card-agents", h);
+  },
+  onRest: (cb) => {
+    const h = (_e, on) => cb(on);
+    ipcRenderer.on("card-rest", h);
+    return () => ipcRenderer.off("card-rest", h);
+  },
+  // The app saw the pointer leave the island (false) while it was open.
+  onPointer: (cb) => {
+    const h = (_e, inside) => cb(Boolean(inside));
+    ipcRenderer.on("card-pointer", h);
+    return () => ipcRenderer.off("card-pointer", h);
+  },
   onNavigate: (cb) => {
     const h = (_e, s) => cb(s);
     ipcRenderer.on("navigate", h);

@@ -63,5 +63,5 @@ export function stripLeadIn(line, { agentName, project } = {}) {
 /** What the app's card window gets: display names, and the line without its lead-in. */
 export function cardPayload(c, { agentName, project } = {}) {
   const line = stripLeadIn(c.line, { agentName, project });
-  return { id: c.id, line, kind: c.kind, state: c.state, reason: c.reason, agentId: c.agent, agentName, project };
+  return { id: c.id, line, kind: c.kind, state: c.state, reason: c.reason, agentId: c.agent, agentName, project, session: c.session || null };
 }

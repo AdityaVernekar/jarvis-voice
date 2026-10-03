@@ -3,10 +3,13 @@
 // summarises and speaks them. The Node core in ../../src (Resources/core when packaged) does
 // the work, so the app and the `earpiece` CLI always behave the same.
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createDashboard, tidyPath } from "./dashboard.mjs";
+import { createUpdater } from "./updater.mjs";
+import { createTelemetry } from "./telemetry.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(here, "..");
@@ -15,7 +18,7 @@ const asset = (f) => path.join(APP_ROOT, "build", f);
 const core = (rel) => import(pathToFileURL(path.join(CORE, rel)).href);
 
 const DAY = 24 * 3600_000;
-let tray, popover, win, hub, dash, asks = null, hubError = null;
+let tray, popover, win, hub, dash, updater, asks = null, hubError = null;
 let quitting = false;
 let lib = {};
 const SECTIONS = ["overview", "agents", "voice", "quiet", "keys", "activity", "general"];
@@ -43,7 +46,31 @@ const prefs = {
       for (const id of ["claude-code", "codex"]) if (lib.getAdapter(id)?.isInstalled?.()) connectAgents(id);
       return { answerFromCard: Boolean(value) };
     }
-    if (key !== "showInDock" && key !== "showCard") throw new Error("unknown preference");
+    if (key === "notch") {
+      // "auto" detects the notch; "on"/"off" override it (e.g. a notch that isn't detected).
+      if (!["auto", "on", "off"].includes(value)) throw new Error("notch must be auto, on or off");
+      const next = { ...this.get(), notch: value };
+      fs.mkdirSync(path.dirname(this.file()), { recursive: true });
+      fs.writeFileSync(this.file(), JSON.stringify(next, null, 2));
+      if (cardWin?.isVisible()) placeCard(currentDisplay());
+      return next;
+    }
+    if (key === "notchIcon") {
+      // "always": the island rests in the notch between lines; "updates": it only shows for a line.
+      if (!["always", "updates"].includes(value)) throw new Error("notchIcon must be always or updates");
+      const next = { ...this.get(), notchIcon: value };
+      fs.mkdirSync(path.dirname(this.file()), { recursive: true });
+      fs.writeFileSync(this.file(), JSON.stringify(next, null, 2));
+      applyRest();
+      return next;
+    }
+    if (key === "installId") {
+      const next = { ...this.get(), installId: String(value) };
+      fs.mkdirSync(path.dirname(this.file()), { recursive: true });
+      fs.writeFileSync(this.file(), JSON.stringify(next, null, 2));
+      return next;
+    }
+    if (key !== "showInDock" && key !== "showCard" && key !== "shareStats") throw new Error("unknown preference");
     const next = { ...this.get(), [key]: Boolean(value) };
     fs.mkdirSync(path.dirname(this.file()), { recursive: true });
     fs.writeFileSync(this.file(), JSON.stringify(next, null, 2));
@@ -51,6 +78,7 @@ const prefs = {
     if (key === "showCard") {
       asks?.setUi(next.showCard);
       if (!next.showCard) (asks?.closeAll(), cardWin?.hide());
+      applyRest();
     }
     return next;
   },
@@ -86,7 +114,7 @@ function migratePrefs() {
 async function start() {
   migratePrefs();
   if (prefs.get().showInDock === false) app.dock?.hide();
-  const [paths, server, sessions, policy, config, adapters, control, shim, util, cards, askLib, originLib] = await Promise.all([
+  const [paths, server, sessions, policy, config, adapters, control, shim, util, cards, askLib, originLib, jumpLib, notchLib] = await Promise.all([
     core("src/paths.mjs"),
     core("src/hub/server.mjs"),
     core("src/hub/sessions.mjs"),
@@ -99,8 +127,10 @@ async function start() {
     core("src/card.mjs"),
     core("src/hub/asks.mjs"),
     core("src/hub/origin.mjs"),
+    core("src/hub/jump.mjs"),
+    core("src/notch.mjs"),
   ]);
-  lib = { ...paths, ...server, ...sessions, ...policy, ...config, ...adapters, ...control, ...shim, ...util, ...cards, ...askLib, ...originLib };
+  lib = { ...paths, ...server, ...sessions, ...policy, ...config, ...adapters, ...control, ...shim, ...util, ...cards, ...askLib, ...originLib, ...jumpLib, ...notchLib };
   lib.ensureDirs();
 
   // Re-written on every launch, so hooks keep working if the app is moved.
@@ -124,10 +154,38 @@ async function start() {
   tray.on("click", () => togglePopover());
   tray.on("right-click", () => tray.popUpContextMenu(buildMenu()));
 
-  dash = createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect: connectAgents, disconnect: disconnectAgents, refresh, prefs });
+  updater = createUpdater({
+    version: app.getVersion(),
+    exePath: app.getPath("exe"),
+    isPackaged: app.isPackaged,
+    tmpDir: app.getPath("temp"),
+    pid: process.pid,
+    log: lib.log,
+    openExternal: (url) => shell.openExternal(url),
+    quit: () => app.quit(),
+    onChange: scheduleRefresh,
+  });
+  dash = createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect: connectAgents, disconnect: disconnectAgents, refresh, prefs, updater });
   Menu.setApplicationMenu(appMenu());
+  noteDisplays();
+  for (const ev of ["display-added", "display-removed", "display-metrics-changed"]) screen.on(ev, onDisplaysChanged);
   watchState();
   refresh();
+  applyRest(); // the resting icon in the notch, unless you turned it off
+  updater.start(); // a few seconds after launch, then every 6 hours
+  // Anonymous usage stats from the released app only, so dev runs don't count as installs.
+  if (app.isPackaged)
+    createTelemetry({
+      getPrefs: () => prefs.get(),
+      saveInstallId: (id) => prefs.set("installId", id),
+      info: () => ({
+        version: app.getVersion(),
+        osVersion: process.getSystemVersion(),
+        arch: process.arch,
+        locale: app.getLocale(),
+        agents: hookStatus().filter((h) => h.target).map((h) => h.id),
+      }),
+    }).start();
   // Started at login: stay in the menu bar. Opened by you: show the window.
   const login = app.getLoginItemSettings();
   if (!(login.wasOpenedAtLogin || login.wasOpenedAsHidden)) showMain();
@@ -187,6 +245,7 @@ function state() {
     hooks: hookStatus(),
     speaking: lib.isSpeaking(), // audio is playing, not merely "waiting on the TTS API"
     openAtLogin: app.getLoginItemSettings().openAtLogin,
+    update: updater?.state() || null,
   };
 }
 
@@ -205,6 +264,7 @@ function refresh() {
   setSpeaking(s.speaking);
   popover?.webContents.send("state", s);
   win?.webContents.send("state", s);
+  sendAgents(s);
 }
 
 let speakingShown = false;
@@ -237,17 +297,34 @@ function watchState() {
   setInterval(refresh, 30_000).unref(); // ages in the popover, mode timers running out
 }
 
-// ---------- floating card ----------
-// A small dark island under the menu bar showing who spoke and what they said. It never takes
-// focus, follows you across Spaces and full-screen apps, and lets clicks through everywhere
-// except the card itself. The core writes card.json (see src/card.mjs); we poll its mtime.
+// ---------- notch island ----------
+// A black island that lives in the MacBook notch (or hangs from the top edge as a "virtual
+// notch" on screens without one). Between lines it rests there as a small icon: the Earpiece
+// mark, how many agents are running and one status dot; click it for the list of agents. A line
+// peeks it open for a few seconds, then it folds back to rest. It never takes focus, follows you
+// across Spaces and full-screen apps, stays out of Mission Control, and lets clicks through
+// everywhere except the island itself. The core writes card.json (see src/card.mjs); we poll its
+// mtime. The shape and animation live in renderer/card.*.
 
-const CARD_W = 480;
-const CARD_H = 104;
+const CARD_W = 480; // the open island is 460 wide, plus its curved shoulders
+// One fixed height, tall enough for the open card or the agents list plus its shadow. Resizing a
+// transparent window while the island animates makes it stutter, so the window never resizes;
+// clicks go through the empty part.
+const CARD_H = 560;
+// Electron can't read the notch's real width (NSScreen.auxiliaryTopLeftArea), so this is a
+// slightly generous estimate: the wings' logo and dot must sit outside the cut-out.
+const NOTCH_W = 204;
+const notchDisplays = new Map(); // display id -> menu bar height, for built-in screens with a notch
 let cardWin = null;
 let cardReady = false;
 let cardPending = null;
 let cardMtime = 0;
+let cardHover = false;
+let islandRect = { w: 0, h: 0 }; // the island's current size, from the renderer
+let pointerTimer = null;
+
+// The island rests in the notch unless the card is off or you only want it for updates.
+const restIcon = () => prefs.get().showCard !== false && prefs.get().notchIcon !== "updates";
 
 function createCardWin() {
   cardWin = new BrowserWindow({
@@ -266,9 +343,15 @@ function createCardWin() {
     hasShadow: false,
     acceptFirstMouse: true,
     alwaysOnTop: true,
+    // Mission Control and App Exposé leave it out instead of laying it out like a window.
+    hiddenInMissionControl: true,
+    // Frameless windows may sit in the menu bar strip; this stops macOS pushing it below.
+    enableLargerThanScreen: true,
     webPreferences: webPreferences(),
   });
+  // "status" is above the menu bar, so the island can sit over it, in the notch.
   cardWin.setAlwaysOnTop(true, "status");
+  cardWin.setHiddenInMissionControl?.(true);
   // skipTransformProcessType keeps the Dock icon; without it macOS turns us into an agent app.
   cardWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   cardWin.setIgnoreMouseEvents(true, { forward: true });
@@ -276,32 +359,129 @@ function createCardWin() {
   lockDown(cardWin);
   cardWin.webContents.once("did-finish-load", () => {
     cardReady = true;
+    sendAgents();
     if (cardPending) sendCard(cardPending);
+    else if (restIcon()) showRest();
     cardPending = null;
   });
-  cardWin.on("closed", () => ((cardWin = null), (cardReady = false)));
+  cardWin.on("closed", () => (clearInterval(pointerTimer), (cardWin = null), (cardReady = false), (cardHover = false)));
 }
 
-function placeCard() {
-  const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  cardWin.setBounds({ x: Math.round(workArea.x + (workArea.width - CARD_W) / 2), y: workArea.y + 2, width: CARD_W, height: cardH });
+// A notch shows up as a taller menu bar (about 37 pt against 24) on the built-in screen. The
+// menu bar is gone in a full-screen app, so remember what we saw per display.
+function noteDisplays() {
+  for (const d of screen.getAllDisplays()) {
+    const menuH = d.workArea.y - d.bounds.y;
+    if (d.internal && menuH >= 30) notchDisplays.set(d.id, menuH);
+  }
+}
+
+function notchFor(d) {
+  const mode = prefs.get().notch || "auto";
+  const menuH = d.workArea.y - d.bounds.y;
+  const seen = notchDisplays.get(d.id) || (d.internal && menuH >= 30 ? menuH : 0);
+  if (seen) notchDisplays.set(d.id, seen);
+  const notch = mode === "on" ? true : mode === "off" ? false : Boolean(seen);
+  return { notch, notchW: NOTCH_W, notchH: notch ? Math.max(seen || menuH, 32) : 0 };
+}
+
+// Where the island rests: the screen with the notch, else the built-in one, else the main one.
+function homeDisplay() {
+  const all = screen.getAllDisplays();
+  return all.find((d) => notchDisplays.has(d.id)) || all.find((d) => d.internal) || screen.getPrimaryDisplay();
+}
+
+const cursorDisplay = () => screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+const currentDisplay = () => (cardWin ? screen.getDisplayMatching(cardWin.getBounds()) : homeDisplay());
+
+let warnedClamp = false;
+let placedOn = null;
+function placeCard(d = cursorDisplay()) {
+  const geom = notchFor(d);
+  cardWin.setBounds({ x: Math.round(d.bounds.x + (d.bounds.width - CARD_W) / 2), y: d.bounds.y, width: CARD_W, height: cardH });
+  const got = cardWin.getBounds();
+  if (got.y !== d.bounds.y && !warnedClamp) {
+    warnedClamp = true;
+    lib.log({ error: `app card: macOS moved the island to y=${got.y} (wanted ${d.bounds.y})` });
+  }
+  // Once per screen, so a notch that isn't picked up can be told apart from a window that never showed.
+  const key = `${d.id}:${geom.notch}`;
+  if (placedOn !== key) {
+    placedOn = key;
+    lib.log({ app: "card placed", display: d.id, internal: Boolean(d.internal), notch: geom.notch, menuH: d.workArea.y - d.bounds.y, x: got.x, y: got.y });
+  }
+  cardWin.webContents.send("card-geom", geom);
+}
+
+function showRest() {
+  if (!cardWin || !cardReady) return;
+  if (!cardWin.isVisible()) {
+    placeCard(homeDisplay());
+    cardWin.setIgnoreMouseEvents(true, { forward: true });
+    cardWin.showInactive();
+  }
+  cardWin.webContents.send("card-rest", true);
+}
+
+// Turn the resting icon on or off after a preference change (and once at launch).
+function applyRest() {
+  if (restIcon()) {
+    if (!cardWin) createCardWin();
+    else (sendAgents(), showRest());
+  } else if (cardWin) {
+    cardWin.webContents.send("card-rest", false);
+  }
+}
+
+// The resting icon and its list show the same sessions as the popover.
+function sendAgents(s) {
+  if (!cardWin || !cardReady) return;
+  const st = s || state();
+  cardWin.webContents.send("card-agents", { ...lib.notchAgents(st.sessions), mode: st.mode, rest: restIcon(), now: Date.now() });
+}
+
+function onDisplaysChanged() {
+  noteDisplays();
+  if (!cardWin?.isVisible()) return;
+  const all = screen.getAllDisplays();
+  const d = all.find((x) => x.id === currentDisplay().id) || homeDisplay();
+  placeCard(d);
 }
 
 function sendCard(c) {
-  // A question is taller than a line; the card measures itself and reports back ("size").
-  const h = c.ask ? (cardIsAsk ? cardH : ASK_H) : CARD_H;
-  cardIsAsk = Boolean(c.ask);
   if (!cardWin.isVisible()) {
-    cardH = h;
     placeCard();
     cardWin.setIgnoreMouseEvents(true, { forward: true });
     if (hiddenForFocus) (hiddenForFocus = false, app.show?.());
     cardWin.showInactive();
-  } else if (cardH !== h) {
-    cardH = h;
-    placeCard();
+  } else if (!cardHover) {
+    // Resting on another screen: bring the line to the one you're working on.
+    const d = cursorDisplay();
+    if (d.id !== currentDisplay().id) placeCard(d);
   }
   cardWin.webContents.send("card", c);
+}
+
+// While the pointer is on the island, check where it is a few times a second. Leaving fast (off
+// the top edge, or straight into another app to click) can skip the page's mouseleave, and the
+// island would stay open and keep catching clicks. A click outside always means the pointer left.
+function setCardHover(on) {
+  cardHover = on;
+  cardWin?.setIgnoreMouseEvents(!on, { forward: true });
+  clearInterval(pointerTimer);
+  pointerTimer = null;
+  if (!on) return;
+  pointerTimer = setInterval(() => {
+    if (!cardWin?.isVisible()) return setCardHover(false);
+    const b = cardWin.getBounds();
+    const p = screen.getCursorScreenPoint();
+    const half = islandRect.w / 2 + 10; // plus the curved shoulders
+    const cx = b.x + b.width / 2;
+    const inside = p.x >= cx - half && p.x <= cx + half && p.y >= b.y && p.y <= b.y + islandRect.h + 2;
+    if (inside) return;
+    setCardHover(false);
+    cardWin.webContents.send("card-pointer", false);
+  }, 60);
 }
 
 function deliverCard(payload) {
@@ -321,11 +501,10 @@ function presentCard(c) {
 
 // ---------- answering from the card ----------
 // A blocking hook (see src/hub/asks.mjs) is waiting for you. The oldest question is on the card;
-// the rest queue behind it ("+N more"). Nothing is approved unless you click a button.
+// the rest queue behind it ("+N more"). The island turns amber in the notch and only opens when
+// you click it. Nothing is approved unless you click a button.
 
-const ASK_H = 230;
-let cardH = CARD_H;
-let cardIsAsk = false;
+const cardH = CARD_H;
 let hiddenForFocus = false;
 let lastAnswer = null; // what the card just sent, so onAsksChange can show a one-line confirmation
 
@@ -335,11 +514,13 @@ function agentLabel(id) {
 }
 
 const ARM_MS = 700; // the renderer disables the buttons for this long; the app enforces it too
+// The question you can actually see: set when the island is opened on it ("expanded"), cleared
+// when it folds back. Answers are only taken for this one, ARM_MS after it opened.
 let shown = { id: null, at: 0 };
 
 function askPayload(list) {
   const a = list[0];
-  if (shown.id !== a.id) shown = { id: a.id, at: Date.now() };
+  if (shown.id !== a.id) shown = { id: null, at: 0 };
   return {
     id: a.id,
     line: a.line,
@@ -347,6 +528,7 @@ function askPayload(list) {
     state: "ask",
     agentId: a.agent,
     agentName: agentLabel(a.agent),
+    session: a.session || null,
     project: a.project || null,
     more: list.length - 1,
     at: a.at,
@@ -375,7 +557,21 @@ function onAsksChange(list, change) {
 }
 
 // The reply box needs the keyboard, so the card becomes focusable only while you type in it.
-function grabCardFocus() {
+// Before the box takes the keyboard, note which app had it (your terminal, usually) so it can
+// be handed straight back. lsappinfo needs no permission; ids go in as argv, never into a script.
+let focusReturn = null;
+const run = (cmd, args) => new Promise((res) => execFile(cmd, args, { timeout: 800 }, (err, out) => res(err ? "" : String(out))));
+async function frontApp() {
+  if (process.platform !== "darwin") return null;
+  const asn = (await run("/usr/bin/lsappinfo", ["front"])).trim();
+  if (!/^ASN:0x[0-9a-f]+-0x[0-9a-f]+:?$/i.test(asn)) return null;
+  const front = lib.parseFrontApp(await run("/usr/bin/lsappinfo", ["info", asn]));
+  return front && front.pid !== process.pid ? front : null;
+}
+
+async function grabCardFocus() {
+  if (!cardWin) return;
+  if (!cardWin.isFocusable()) focusReturn = await frontApp().catch(() => null);
   if (!cardWin) return;
   cardWin.setFocusable(true);
   cardWin.focus();
@@ -384,9 +580,14 @@ function grabCardFocus() {
 function releaseCardFocus() {
   if (!cardWin || cardWin.isFocusable() === false) return;
   cardWin.setFocusable(false);
-  // Give the keyboard back to the terminal: hide the app, unless a window of ours is open or a
-  // question is still waiting (hiding the app would hide its card too).
-  if (process.platform === "darwin" && !asks?.size() && !win?.isVisible() && !popover?.isVisible()) {
+  const back = focusReturn;
+  focusReturn = null;
+  if (process.platform !== "darwin" || win?.isVisible() || popover?.isVisible()) return;
+  // Re-activate the app you were in; the island stays where it is.
+  if (back) return void execFile("/usr/bin/open", ["-b", back.bundleId], () => {});
+  // Don't know who had it: hide the app instead, unless a question is still waiting (hiding the
+  // app would hide its card too). The resting icon comes back with the next line.
+  if (!asks?.size()) {
     hiddenForFocus = true;
     app.hide();
   }
@@ -463,7 +664,7 @@ function buildMenu() {
     { label: "Open Earpiece", click: () => showMain() },
     { type: "separator" },
     { label: "On", type: "radio", checked: mode === "on", click: () => setMode("on") },
-    { label: "Quiet for 1 hour", sublabel: "only “needs you” pings", type: "radio", checked: mode === "quiet", click: () => setMode("quiet", 60) },
+    { label: "Quiet for 1 hour", sublabel: "shows updates, no voice", type: "radio", checked: mode === "quiet", click: () => setMode("quiet", 60) },
     { label: "Off", type: "radio", checked: mode === "off", click: () => setMode("off") },
     { type: "separator" },
     { label: "Stop talking now", click: () => (lib.stopSpeaking(), refresh()) },
@@ -473,6 +674,7 @@ function buildMenu() {
     { label: "Settings…", click: () => showMain("voice") },
     { label: "Activity", click: () => showMain("activity") },
     { type: "separator" },
+    ...(updater?.state().newer ? [{ label: `Update to ${updater.state().latest}…`, click: () => showMain("overview") }] : []),
     { label: `Earpiece ${app.getVersion()}`, enabled: false },
     { label: "Quit Earpiece", accelerator: "Cmd+Q", click: () => app.quit() },
   ]);
@@ -628,6 +830,33 @@ function appMenu() {
   ]);
 }
 
+// ---------- jumping to the agent ----------
+// A click on the island (or Open on an Overview row) brings forward the window the agent runs
+// in: the exact iTerm2 or Terminal tab, the editor window with its folder, or just the app. See
+// src/hub/jump.mjs. With nowhere to go, the dashboard opens instead.
+
+async function jumpToSession(agent, session, { fallback = true } = {}) {
+  const a = agent ? String(agent) : null;
+  const s = a && session ? lib.getSession(a, String(session)) : null;
+  let r;
+  try {
+    r = await lib.jumpTo({ agent: a, origin: s?.origin || null, cwd: s?.cwd || null });
+  } catch (e) {
+    r = { ok: false, error: e.message };
+  }
+  lib.log({ app: "jump", agent: a, how: r.how || "none", precision: r.precision || "none", ...(r.why ? { why: r.why } : {}), ...(r.note ? { note: r.note } : {}) });
+  if (!r.ok) {
+    if (r.error) lib.log({ error: `app jump: ${r.error}` });
+    if (fallback) showMain("overview");
+  } else if (r.note === "folder-missing" && prefs.get().showCard !== false && !asks?.size()) {
+    // Say why you landed on the app and not the project window. Shown, never spoken.
+    const agentName = a ? lib.agentConfig(lib.config(), a).label || lib.getAdapter(a)?.name || a : "Earpiece";
+    const line = "That session's folder is gone, so only the app came forward.";
+    deliverCard({ ...lib.cardPayload({ id: `jump-${Date.now()}`, line, kind: "info", agent: a, project: s?.project, session: session ? String(session) : null, state: "spoken" }, { agentName, project: s?.project }), brief: true });
+  }
+  return r;
+}
+
 // ---------- IPC ----------
 // The renderers get these and nothing else (see preload.cjs). Arguments are checked here.
 
@@ -638,6 +867,7 @@ ipcMain.handle("session", (_e, action, agent, session) => {
   const id = String(session || "");
   if (!lib.getSession(a, id)) return { ok: false, error: "That session is gone." };
   try {
+    if (action === "jump") return jumpToSession(a, id, { fallback: false }).then((r) => (r.ok ? { ok: true, precision: r.precision } : { ok: false, error: r.error || "Nowhere to go for this session yet." }));
     if (action === "done") lib.setSessionStatus(a, id, "done");
     else if (action === "forget") lib.forgetSession(a, id);
     else return { ok: false, error: "unknown action" };
@@ -651,17 +881,38 @@ ipcMain.handle("card", (e, action, value) => {
   if (!cardWin || e.sender !== cardWin.webContents) return;
   if (action === "hidden") {
     if (asks?.size()) return; // a stale "hidden" from a card that was replaced by a question
-    cardWin.hide();
     releaseCardFocus();
+    if (restIcon()) return showRest(); // stale: the island rests instead of hiding
+    cardWin.hide();
   }
-  else if (action === "hover") cardWin.setIgnoreMouseEvents(!value, { forward: true });
+  else if (action === "rest") {
+    // Back to the resting icon: return to its home screen if a line pulled it elsewhere.
+    releaseCardFocus();
+    const d = homeDisplay();
+    if (!cardHover && cardWin.isVisible() && d.id !== currentDisplay().id) placeCard(d);
+  }
+  else if (action === "hover") setCardHover(Boolean(value));
+  else if (action === "rect") {
+    const v = value && typeof value === "object" ? value : {};
+    islandRect = { w: Math.min(Math.max(Number(v.w) || 0, 0), CARD_W), h: Math.min(Math.max(Number(v.h) || 0, 0), CARD_H) };
+  }
   else if (action === "stop") (lib.stopSpeaking(), refresh());
   else if (action === "open") showMain("overview");
+  else if (action === "jump") {
+    const v = value && typeof value === "object" ? value : {};
+    jumpToSession(v.agent, v.session);
+  }
   else if (action === "focus") (value ? grabCardFocus() : releaseCardFocus());
-  else if (action === "size") {
-    const h = Math.min(Math.max(Math.round(Number(value)) || CARD_H, CARD_H), 460);
-    if (cardIsAsk && h !== cardH) ((cardH = h), cardWin.isVisible() && placeCard());
-  } else if (action === "defer") asks?.cancel(String(value), "deferred"); // "answer in the terminal instead"
+  else if (action === "size") {} // the window has a fixed height now (see CARD_H)
+  else if (action === "expanded") {
+    const id = value == null ? null : String(value);
+    shown = id && asks?.get(id) ? { id, at: Date.now() } : { id: null, at: 0 };
+  } else if (action === "defer") {
+    // "Answer in the terminal instead": hand the question back and take you to that terminal.
+    const ask = asks?.get(String(value));
+    asks?.cancel(String(value), "deferred");
+    if (ask) jumpToSession(ask.agent, ask.session, { fallback: false });
+  }
 });
 // The card's answer to a question. Only the card window may send it, and the shape is checked
 // again in asks.answer() (unknown id, "always" when it isn't offered, empty reply).

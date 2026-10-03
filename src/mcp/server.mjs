@@ -132,7 +132,7 @@ function gate(ev, at) {
 
 const BLOCKED = {
   mode_off: "Earpiece is switched off",
-  mode_quiet: "Earpiece is in quiet mode, which only speaks questions and errors",
+  mode_quiet: "Earpiece is in quiet mode, which shows updates on screen without speaking",
   quiet_hours: "it is inside the user's quiet hours",
   agent_disabled: "Claude Desktop is muted in Earpiece",
 };

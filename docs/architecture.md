@@ -69,7 +69,7 @@ An alert counts as answered once the session's latest activity is newer than the
 | `info` | `line` or `text` as given | unchanged |
 | `activity` | nothing | working, if it was waiting |
 
-Quiet hours let the kinds in `quietHours.allow` through (`needs_input` by default, nothing with `earpiece quiet-hours --silent`). `earpiece quiet` lets `needs_input` and `error` through. `earpiece off` silences everything. The registry is updated either way, so `earpiece agents` stays accurate.
+Quiet hours let the kinds in `quietHours.allow` through (`needs_input` by default, nothing with `earpiece quiet-hours --silent`). `earpiece quiet` speaks nothing (no chimes either); every line still goes to the card with a "Quiet" tag. `earpiece off` silences everything. The registry is updated either way, so `earpiece agents` stays accurate.
 
 ## Environment variables
 

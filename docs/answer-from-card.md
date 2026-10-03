@@ -1,6 +1,6 @@
 # Answer from the card
 
-Approve or deny a tool request, or reply to a question, from the floating card instead of switching to the terminal. Claude Code and Codex are supported. It is off by default.
+Approve or deny a tool request, or reply to a question, from the floating card instead of switching to the terminal. Claude Code and Codex are supported. It is off by default. Questions don't open on their own: the card's island turns amber and pulses in the notch until you click it.
 
 ## Turn it on
 
@@ -22,7 +22,7 @@ Mac app: General → **Answer from the card**. CLI: `earpiece answers on` (needs
 
 - Nothing is approved by keyboard, and the buttons are disabled for the first 0.7 s a question is on screen.
 - The card never takes the keyboard by itself. Clicking into the reply box makes it focusable; when you finish, the app hides itself to return the keyboard to the terminal.
-- Only the card window can send an answer, and the app checks it again: it must be the question on screen, shown for at least 0.7 s, and the answer must fit (Always only when offered, no empty reply).
+- Only the card window can send an answer, and the app checks it again: it must be the question the island is open on, opened at least 0.7 s ago, and the answer must fit (Always only when offered, no empty reply).
 - A command too long for the card is shown with its start and its end and a "more characters not shown" marker, and can only be denied or left to the terminal. Invisible and direction-changing characters are stripped, and Always allow names the rule it will add.
 - At most 20 questions are open at once; more go straight to the terminal.
 - The hub socket is `0600`, with no network port. Commands are redacted (API keys, tokens) before they are shown.
