@@ -211,13 +211,6 @@ function overview() {
   const s = D.stats;
   const parts = [
     updateBanner("overview"),
-    !D.account?.user && !D.prefs?.hideSignInNudge
-      ? h(
-          "div",
-          { class: "group" },
-          row("Sign in to hear about new features", "Optional, with Google. Earpiece works the same without it.", btn("Sign in", () => act("signIn"), "primary"), btn("Not now", () => setPref("hideSignInNudge", true))),
-        )
-      : null,
     h(
       "div",
       { class: "group" },
@@ -824,6 +817,60 @@ async function setPref(key, value) {
   await reload().catch(() => {});
   render();
 }
+// First run: a sign-up screen over the whole window. Optional: "Skip for now" hides it for good,
+// and General → Account can sign in later.
+const showWelcome = () => !D.account?.user && !D.prefs?.hideSignInNudge;
+let signingIn = false;
+
+function googleMark() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 48 48");
+  svg.setAttribute("aria-hidden", "true");
+  for (const [fill, d] of [
+    ["#FFC107", "M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"],
+    ["#FF3D00", "M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"],
+    ["#4CAF50", "M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"],
+    ["#1976D2", "M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"],
+  ]) {
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("fill", fill);
+    p.setAttribute("d", d);
+    svg.append(p);
+  }
+  return svg;
+}
+
+function welcome() {
+  const err = D.account?.error;
+  if (err) signingIn = false;
+  const start = async () => {
+    signingIn = true;
+    render();
+    try {
+      await act("signIn");
+    } catch {
+      signingIn = false;
+      render();
+    }
+  };
+  return h(
+    "div",
+    { class: "welcome drag", role: "dialog", "aria-modal": "true", "aria-labelledby": "welcomeTitle" },
+    h(
+      "div",
+      { class: "welcome-card" },
+      h("span", { class: "wave", "aria-hidden": "true" }, h("i"), h("i"), h("i"), h("i"), h("i")),
+      h("h1", { id: "welcomeTitle" }, "Welcome to Earpiece"),
+      h("p", {}, "Create your free account to hear about new features first."),
+      h("button", { class: "google", onclick: start }, googleMark(), signingIn ? "Open Google again" : "Continue with Google"),
+      signingIn ? h("p", { class: "note" }, "Finish signing in in your browser, then come back here.") : null,
+      err ? h("p", { class: "note err" }, `Sign-in didn't finish: ${err}`) : null,
+      h("button", { class: "skip", onclick: () => ((signingIn = false), setPref("hideSignInNudge", true)) }, "Skip for now"),
+    ),
+  );
+}
+
 function account() {
   const A = D.account || {};
   const u = A.user;
@@ -940,6 +987,8 @@ function render() {
   $("title").textContent = SECTIONS[section];
   $("headActions").replaceChildren(...headActions());
   view.replaceChildren(h("div", { class: "page" }, VIEWS[section]()));
+  document.querySelector(".welcome")?.remove();
+  if (showWelcome()) document.body.append(welcome());
   view.scrollTop = top;
   const v = document.querySelector(".voices");
   if (v && vs) v.scrollTop = vs;
@@ -981,7 +1030,8 @@ J.onState((s) => {
 });
 J.onNavigate((s) => go(s || "overview"));
 window.addEventListener("focus", () => {
-  if (section === "overview" || section === "general") reload().then(render).catch(() => {});
+  // Coming back from the browser after signing in lands here too.
+  if (section === "overview" || section === "general" || document.querySelector(".welcome")) reload().then(render).catch(() => {});
 });
 
 reload()

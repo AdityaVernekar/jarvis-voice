@@ -231,3 +231,18 @@ input[type="range"] { width: 140px; accent-color: var(--blue); }
 .update-bar i { display: block; height: 100%; background: var(--blue); transition: width 0.4s; }
 .update-banner.verifying .update-bar i, .update-banner.installing .update-bar i { animation: upd-pulse 1.2s ease-in-out infinite; }
 @keyframes upd-pulse { 50% { opacity: 0.45; } }
+
+/* First-run sign-up screen, over the whole window (the traffic lights stay on top). */
+.welcome { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: var(--content); }
+.welcome-card { -webkit-app-region: no-drag; width: 320px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.welcome .wave { height: 30px; gap: 4px; margin-bottom: 22px; }
+.welcome .wave i { width: 5px; border-radius: 3px; background: var(--blue); }
+.welcome h1 { margin: 0 0 8px; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+.welcome p { margin: 0 0 26px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.welcome p.note { margin: 12px 0 0; font-size: 12px; }
+.welcome p.err { color: var(--red); }
+button.google { display: inline-flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 40px; border: 1px solid #dadce0; border-radius: 8px; background: #fff; color: #1f1f1f; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+button.google svg { width: 18px; height: 18px; flex: none; }
+button.google:active { filter: brightness(0.95); }
+button.skip { margin-top: 16px; padding: 4px 8px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
+button.skip:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }

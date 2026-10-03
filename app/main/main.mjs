@@ -132,7 +132,8 @@ function applyDock(show) {
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on("second-instance", () => showMain());
-  app.setAsDefaultProtocolClient("earpiece");
+  // Packaged only: in dev, macOS would register the bare Electron.app, which can't handle the link.
+  if (app.isPackaged) app.setAsDefaultProtocolClient("earpiece");
   app.on("open-url", (e, url) => (e.preventDefault(), onAuthLink(url)));
   app.whenReady().then(start).catch((e) => {
     dialog.showErrorBox("Earpiece could not start", String(e?.stack || e));
