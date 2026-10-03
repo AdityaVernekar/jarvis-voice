@@ -223,6 +223,10 @@ input[type="range"] { width: 140px; accent-color: var(--blue); }
 .session:hover .icon-btn, .icon-btn:focus-visible { opacity: 1; }
 .icon-btn:hover { background: var(--chip); color: var(--fg); }
 
+/* Pro upsell on Overview, for everyone not on Pro */
+.pro-banner { margin-bottom: 14px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--amber) 45%, transparent); }
+.pro-banner .label small { white-space: normal; }
+
 /* Update banner (Overview and General) */
 .update-banner { margin-bottom: 14px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 45%, transparent); }
 .update-banner.failed { box-shadow: 0 0 0 1px color-mix(in srgb, var(--red) 45%, transparent); }

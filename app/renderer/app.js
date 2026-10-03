@@ -205,12 +205,28 @@ function updateBanner(where) {
   );
 }
 
+// Always on Overview for anyone not on Pro. Signed out, the button signs in first: Pro needs an account.
+function proBanner() {
+  if (D.account?.plan?.plan === "pro") return null;
+  const signedIn = Boolean(D.account?.user);
+  return h(
+    "div",
+    { class: "group pro-banner" },
+    row(
+      "Upgrade to Earpiece Pro",
+      "Natural voices and one-line summaries on Earpiece's keys, so you don't need any API keys. $10 a month, or $96 a year.",
+      signedIn ? btn("Upgrade", () => act("upgrade", { interval: "month" }), "primary") : btn("Sign in to upgrade", () => act("signIn"), "primary"),
+    ),
+  );
+}
+
 function overview() {
   const m = modeSentence();
   const connected = D.agents.filter((a) => a.target);
   const s = D.stats;
   const parts = [
     updateBanner("overview"),
+    proBanner(),
     h(
       "div",
       { class: "group" },
