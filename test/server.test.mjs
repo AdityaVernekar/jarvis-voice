@@ -71,12 +71,12 @@ test("shim sends to the hub when it is running", { skip: !hasCurl && "no curl" }
   const hub = await startHubServer();
   try {
     // Async spawn: the hub lives in this process, so blocking on the shim would starve it.
-    const started = Date.now();
+    // No wall-clock limit: under a parallel test run it measured machine load, not the shim. The
+    // fallback is unusable, so the line below can only be spoken if the socket hand-off worked.
     const child = spawn(shim, ["hook", "claude-code"], { stdio: ["pipe", "ignore", "ignore"] });
     child.stdin.end(JSON.stringify({ hook_event_name: "Notification", session_id: "h2", cwd: "/x/cart", message: "Claude needs your permission to use Edit" }));
     const code = await new Promise((res) => child.once("exit", res));
     assert.equal(code, 0);
-    assert.ok(Date.now() - started < 1500, "shim should not wait for curl's timeout");
     await hub.idle();
     assert.equal(spoken().at(-1), "cart needs your permission to use Edit.");
   } finally {

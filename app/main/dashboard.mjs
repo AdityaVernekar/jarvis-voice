@@ -123,7 +123,7 @@ export function friendlyLog(lines, redact = (s) => s) {
 
 // ---------- dashboard ----------
 
-export function createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect, disconnect, refresh, prefs, updater, auth, account, syncAccount }) {
+export function createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect, disconnect, refresh, prefs, updater, auth, account, syncAccount, openBilling }) {
   const voiceCache = new Map();
   let sayVoices = null;
 
@@ -474,6 +474,10 @@ export function createDashboard({ app, dialog, shell, lib, core, state, hookStat
         return keyStatus();
       case "signIn":
         return auth.signIn();
+      case "upgrade":
+        return openBilling({ action: "checkout", interval: a.interval === "year" ? "year" : "month" });
+      case "manageBilling":
+        return openBilling({ action: "portal" });
       case "signOut":
         return auth.signOut().then(syncAccount);
       case "setPref":

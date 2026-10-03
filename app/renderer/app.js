@@ -883,12 +883,18 @@ function account() {
       u
         ? [
             row(u.name || u.email, u.name ? u.email : "Signed in with Google", btn("Sign out", () => act("signOut").then(() => setPref("hideSignInNudge", true)))),
-            row(
-              A.plan?.plan === "pro" ? "Earpiece Pro" : "Free plan",
-              A.plan?.plan === "pro"
-                ? `Hosted voice and summaries on Earpiece's keys, no API keys needed. ${Number(A.plan.lines_used || 0).toLocaleString()} of ${Number(A.plan.lines_cap || 0).toLocaleString()} hosted lines used this month; after that your own keys or the system voice take over.`
-                : "Everything in Earpiece works on Free with your own keys or the system voice. Pro adds hosted voice and summaries.",
-            ),
+            A.plan?.plan === "pro"
+              ? row(
+                  "Earpiece Pro",
+                  `Hosted voice and summaries on Earpiece's keys, no API keys needed. ${Number(A.plan.lines_used || 0).toLocaleString()} of ${Number(A.plan.lines_cap || 0).toLocaleString()} hosted lines used this month; after that your own keys or the system voice take over.`,
+                  btn("Manage billing", () => act("manageBilling")),
+                )
+              : row(
+                  "Free plan",
+                  "Everything works on Free with your own keys or the system voice. Pro adds natural voices and one-line summaries on Earpiece's keys, so you don't need any API keys. $10 a month, or $96 a year.",
+                  btn("Yearly", () => act("upgrade", { interval: "year" })),
+                  btn("Upgrade to Pro", () => act("upgrade", { interval: "month" }), "primary"),
+                ),
           ]
         : row(
             "Sign in with Google",

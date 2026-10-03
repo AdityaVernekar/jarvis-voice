@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Earpiece Pro hosted voice (groundwork).** Signed-in Pro users get Smallest voices and one-line summaries on Earpiece's keys, with no API keys of their own. The Mac app keeps a short-lived token in `~/.earpiece/account.json`; the new `earpiece` engine and hosted summary are tried first and fall back to your own keys or the system voice on any error, over the 3,000-line monthly cap, or when you're not Pro. General → Account shows the plan and this month's usage. Server code (Supabase Edge Functions and migrations) is in `supabase/`. See [SECURITY.md](SECURITY.md#earpiece-pro-hosted-voice).
+- **Upgrade to Pro from the app.** General → Account → Upgrade to Pro ($10/month) or Yearly ($96/year) opens a Dodo Payments checkout in your browser; Pro switches on by itself once payment goes through. Manage billing opens Dodo's portal to change card or cancel; Pro stays until the paid period ends.
 
 ## 0.4.0 (2026-10-03)
 

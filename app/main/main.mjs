@@ -136,6 +136,33 @@ async function syncAccount() {
   lib.writeJson(lib.P.account, { access_token: token, expires_at: auth.expiresAt(), plan: known });
 }
 
+// Pro checkout and the billing portal open in the browser (Dodo Payments, via the `billing` Edge
+// Function). After a checkout, re-read the plan every 15 s for 10 minutes so Pro shows up as soon as
+// the payment webhook has run, without a restart.
+let billingPoll = null;
+async function openBilling(body) {
+  const token = await auth.accessToken();
+  if (!token) throw new Error("Sign in first.");
+  const res = await fetch(`${SUPABASE}/functions/v1/billing`, {
+    method: "POST",
+    headers: { apikey: KEY, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.url) throw new Error(j.error || `Billing is unavailable right now (HTTP ${res.status}).`);
+  await shell.openExternal(j.url);
+  if (body.action === "checkout") {
+    clearInterval(billingPoll);
+    const until = Date.now() + 10 * 60_000;
+    billingPoll = setInterval(async () => {
+      await syncAccount();
+      refresh();
+      if (plan?.plan === "pro" || Date.now() > until) clearInterval(billingPoll);
+    }, 15_000);
+  }
+}
+
 // The browser hands the sign-in back as earpiece://auth?code=….
 async function onAuthLink(url) {
   authError = null;
@@ -232,7 +259,7 @@ async function start() {
     quit: () => app.quit(),
     onChange: scheduleRefresh,
   });
-  dash = createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect: connectAgents, disconnect: disconnectAgents, refresh, prefs, updater, auth, account, syncAccount });
+  dash = createDashboard({ app, dialog, shell, lib, core, state, hookStatus, connect: connectAgents, disconnect: disconnectAgents, refresh, prefs, updater, auth, account, syncAccount, openBilling });
   Menu.setApplicationMenu(appMenu());
   noteDisplays();
   for (const ev of ["display-added", "display-removed", "display-metrics-changed"]) screen.on(ev, onDisplaysChanged);
