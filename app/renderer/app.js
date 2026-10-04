@@ -964,7 +964,7 @@ function general() {
       row(
         "Your work stays on your Mac",
         D.account?.plan?.plan === "pro"
-          ? "We never collect your prompts, code, project names, file paths or API keys, and settings and logs stay local in ~/.earpiece. With Pro's hosted voice, the end of an agent's reply (to summarise it) and the line to speak pass through Earpiece's server to OpenAI and Smallest. They aren't stored; only counts are kept."
+          ? "We never collect your prompts, code, project names, file paths or API keys, and settings and logs stay local in ~/.earpiece. With Pro's hosted voice, the end of an agent's reply (to summarise it) and the line to speak pass through Earpiece's server to its voice and AI providers. They aren't stored; only counts are kept."
           : "We never collect your prompts, code, agent messages, summaries, project names, file paths or API keys. Settings and logs stay local in ~/.earpiece. The only exception is a voice or summary provider you add your own key for, which gets just the text it needs to speak a line.",
       ),
     ),
